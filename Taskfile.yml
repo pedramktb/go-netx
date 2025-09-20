@@ -1,0 +1,22 @@
+version: '3'
+
+tasks:
+  default:
+   cmds:
+      - task --list
+
+  deps:
+    desc: Install dependencies
+    cmds:
+      - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+      - go mod download
+
+  lint:
+    desc: Run linter
+    cmds:
+      - golangci-lint run
+
+  test:
+    desc: Run tests
+    cmds:
+      - go test ./...
