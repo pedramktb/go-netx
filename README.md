@@ -44,7 +44,7 @@ Notes:
 rawClient, rawServer := net.Pipe()
 defer rawClient.Close(); defer rawServer.Close()
 
-client := netx.NewFramedConn(rawClient)                 // default max frame size 16KiB
+client := netx.NewFramedConn(rawClient)                 // default max frame size 32KiB
 server := netx.NewFramedConn(rawServer, netx.WithMaxFrameSize(64<<10))
 
 msg := []byte("hello frame")
@@ -153,10 +153,43 @@ If `Logger` is nil, the server/tunnel use `slog.Default()`.
 - Unhandled connections are dropped immediately after all routes decline.
 - `Shutdown(ctx)` will close listeners, then wait for tracked connections until `ctx` is done, after which remaining connections are force‑closed.
 
-## Testing
+## CLI
 
-The repository includes unit and end‑to‑end tests (UDP over TCP, TLS routing, graceful shutdown). Run:
+An extendable CLI is available at `cmd/netx` with an initial `tun` subcommand to relay between chainable endpoints.
+
+Build:
 
 ```bash
-go test ./...
+task build
 ```
+
+Install and use:
+
+```bash
+go install github.com/pedramktb/go-netx/cmd/netx@latest
+
+# Show help
+netx tun --help
+
+# Example: TCP TLS server to TCP TLS+framed+aesgcm client
+netx tun --from tcp+tls[cert=server.crt,key=server.key] \
+		 --to tcp+tls[serverName=example.com,insecure=true]+buffered[buf=8192]+framed[maxFrame=4096]+aesgcm[key=00112233445566778899aabbccddeeff] \
+		 tcp://:9000 tcp://example.com:9443
+```
+
+Chain syntax:
+
+- Base: `tcp` or `udp`
+- Wrappers:
+  - `tls[cert=...,key=...]` (server) or `tls[serverName=...,ca=...,insecure=true]` (client)
+  - `dtls[cert=...,key=...]` (server) or `dtls[serverName=...,ca=...,insecure=true]` (client) with UDP
+  - `tlspsk[key=...]` (With a deprecated library and TLS1.2, use at your own risk!)
+  - `dtlspsk[key=...]`
+  - `aesgcm[key=<hex>,maxPacket=32768]`
+  - `buffered[buf=4096]`
+  - `framed[maxFrame=32768]`
+
+Notes:
+
+- Endpoints use URI form: `<chain>://host:port`
+- You can chain multiple wrappers on either side; the tool uses `TunMaster` under the hood.
