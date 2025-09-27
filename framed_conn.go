@@ -18,9 +18,9 @@ type framedConn struct {
 	rmu, wmu     sync.Mutex
 }
 
-type framedConnOption func(*framedConn)
+type FramedConnOption func(*framedConn)
 
-func WithMaxFrameSize(size int) framedConnOption {
+func WithMaxFrameSize(size int) FramedConnOption {
 	return func(c *framedConn) {
 		c.maxFrameSize = size
 	}
@@ -29,11 +29,11 @@ func WithMaxFrameSize(size int) framedConnOption {
 // NewFramedConn wraps a net.Conn with a simple length-prefixed framing protocol.
 // Each frame is prefixed with a 4-byte big-endian unsigned integer indicating the length of the frame.
 // If the frame size exceeds maxFrameSize, Read will return ErrFrameTooLarge.
-// The default maxFrameSize is 16KB.
-func NewFramedConn(c net.Conn, opts ...framedConnOption) net.Conn {
+// The default maxFrameSize is 32KB.
+func NewFramedConn(c net.Conn, opts ...FramedConnOption) net.Conn {
 	fc := &framedConn{
 		bc:           c,
-		maxFrameSize: 1 << 14, // 16KB default max frame size
+		maxFrameSize: 32 * 1024, // 32KB default max frame size
 	}
 	for _, opt := range opts {
 		opt(fc)
