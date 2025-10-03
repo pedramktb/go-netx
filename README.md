@@ -181,7 +181,8 @@ Chain syntax:
 
 - Base: `tcp` or `udp`
 - Wrappers:
-  - `tls[cert=...,key=...]` (server) or `tls[serverName=...,ca=...,insecure=true]` (client)
+	- `tls[cert=...,key=...]` (server) or `tls[serverName=...,ca=...,insecure=true]` (client)
+	- `utls[cert=...,key=...]` (server behaves like `tls`; client: `utls[serverName=...,hello=chrome|firefox|ios|android|safari|edge|randomized|randomizedNoALPN,cert=...]`) — client side uses uTLS to reduce fingerprinting; if `cert` provided, SPKI pinning is used
   - `dtls[cert=...,key=...]` (server) or `dtls[serverName=...,ca=...,insecure=true]` (client) with UDP
   - `tlspsk[key=...]` (With a deprecated library and TLS1.2, use at your own risk!)
   - `dtlspsk[key=...]`

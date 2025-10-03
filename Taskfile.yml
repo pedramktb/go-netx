@@ -89,110 +89,85 @@ tasks:
       - build/libnetx_ios_x64.a
       - build/libnetx_ios_arm64.a
 
-  e2e:clean:
-    desc: Clean up e2e artifacts and kill any .e2e pid-based processes
-    cmds:
-      - |
-        set -euo pipefail
-        if [ -d .e2e ]; then
-          cd .e2e || exit 0
-          for f in *.pid; do
-            [ -f "$f" ] || continue
-            kill $(cat "$f") 2>/dev/null || true
-            rm -f "$f"
-          done
-        fi
-        cd - >/dev/null 2>&1 || true
-        rm -rf .e2e
-
   e2e:tun:
-    desc: Run CLI end-to-end tun tests locally (uses .e2e working dir). Set E2E_INCLUDE_TLSPSK=1 to include tlspsk.
+    desc: Run CLI end-to-end tun tests locally (uses .e2e working dir).
     cmds:
       - |
         set -euo pipefail
         ROOT=$(pwd)
         WORK=.e2e
         mkdir -p "$WORK"
-        # build local CLI binary for current platform
+
+        echo "Building netx binary..."
         go build -o "$WORK/netx" ./cmd/netx
         chmod +x "$WORK/netx"
         cd "$WORK"
-        # generate certs/keys
+
+        echo "Generating certs and keys..."
         openssl req -x509 -newkey rsa:2048 -keyout server.key -out server.crt -days 1 -nodes -subj "/CN=localhost" >/dev/null 2>&1
         openssl rand -hex 32 > psk.hex
         cp psk.hex aes.hex
-        # build tiny echo servers and clients from tracked sources (internal, e2e-tagged)
+        echo y | ssh-keygen -t ed25519 -f ssh_server_key -N "" -C "e2e-server" >/dev/null 2>&1
+        echo y | ssh-keygen -t ed25519 -f ssh_client_key -N "" -C "e2e-client" >/dev/null 2>&1
+
+        echo "Building echo servers and clients..."
         go build -tags e2e -o tcp_echo "$ROOT/internal/tools/e2e/tcp_echo"
         go build -tags e2e -o udp_echo "$ROOT/internal/tools/e2e/udp_echo"
         go build -tags e2e -o tcp_client "$ROOT/internal/tools/e2e/tcp_client"
         go build -tags e2e -o udp_client "$ROOT/internal/tools/e2e/udp_client"
-        # cleanup function
-        cleanup(){
-          for p in tcp_echo udp_echo \
-                   tls_server dtls_server tlspsk_server dtlspsk_server aesgcm_tcp_server aesgcm_udp_server framed_tcp_server \
-                   tls_client tlspsk_client dtls_client dtlspsk_client aesgcm_tcp_client aesgcm_udp_client framed_tcp_client; do
-            [ -f ${p}.pid ] && kill $(cat ${p}.pid) 2>/dev/null || true
-            rm -f ${p}.pid || true
-          done
-        }
-        # kill any stale from previous runs, even if EXIT trap didn't fire
-        cleanup || true
-        trap cleanup EXIT
+
         # Use isolated ports to avoid conflicts with external demos
         TE=48080; UE=48081
-        STLS=49000; SDTLS=49100; SDTLSP=49300; SAESCT=49400; SAESCU=49500; SFR=49600; STLSPSK=49200
-        CTLS=50000; CDTLS=50010; CDTLSP=50011; CAESCT=50002; CAESCU=50012; CFR=50003; CTLSPSK=50001
-        # preflight: free ports if occupied by other processes
-        free_port(){
-          port=$1; proto=$2
-          if command -v lsof >/dev/null 2>&1; then
-            if [ "$proto" = tcp ]; then
-              pids=$(lsof -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
-            else
-              pids=$(lsof -t -iUDP:"$port" 2>/dev/null || true)
-            fi
-            if [ -n "$pids" ]; then kill $pids 2>/dev/null || true; fi
-          elif command -v fuser >/dev/null 2>&1; then
-            if [ "$proto" = tcp ]; then fuser -k -n tcp "$port" 2>/dev/null || true; else fuser -k -n udp "$port" 2>/dev/null || true; fi
-          fi
-        }
-        for p in $TE $STLS $SAESCT $SFR $CTLS $CAESCT; do free_port "$p" tcp; done
-        for p in $UE $SDTLS $SDTLSP $SAESCU $CDTLS $CDTLSP $CAESCU; do free_port "$p" udp; done
+        STLS=49000; SDTLS=49100; SDTLSP=49300; SAESCT=49400; SAESCU=49500; SFR=49600; STLSPSK=49200; SSSH=49700; SUTLS=49800
+        CTLS=50000; CDTLS=50010; CDTLSP=50011; CAESCT=50002; CAESCU=50012; CFR=50003; CTLSPSK=50001; CSSH=50004; CUTLS=50005
 
-        # start raw peers
-        (nohup ./tcp_echo 127.0.0.1:${TE} > tcp_echo.log 2>&1 & echo $! > tcp_echo.pid)
-        (nohup ./udp_echo 127.0.0.1:${UE} > udp_echo.log 2>&1 & echo $! > udp_echo.pid)
-        # start server tunnels (accept secure on left, forward to raw peers on right)
-        (nohup ./netx tun --from tcp+tls[cert=server.crt,key=server.key]://127.0.0.1:${STLS}   --to tcp://127.0.0.1:${TE} --log info > tls_server.log 2>&1 & echo $! > tls_server.pid)
-        (nohup ./netx tun --from udp+dtls[cert=server.crt,key=server.key]://127.0.0.1:${SDTLS} --to udp://127.0.0.1:${UE} --log info > dtls_server.log 2>&1 & echo $! > dtls_server.pid)
-        (nohup ./netx tun --from udp+dtlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${SDTLSP}        --to udp://127.0.0.1:${UE} --log info > dtlspsk_server.log 2>&1 & echo $! > dtlspsk_server.pid)
-        (nohup ./netx tun --from tcp+buffered[buf=8192]+framed[maxFrame=4096]+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCT} --to tcp://127.0.0.1:${TE} --log info > aesgcm_tcp_server.log 2>&1 & echo $! > aesgcm_tcp_server.pid)
-        (nohup ./netx tun --from udp+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCU}        --to udp://127.0.0.1:${UE} --log info > aesgcm_udp_server.log 2>&1 & echo $! > aesgcm_udp_server.pid)
-        (nohup ./netx tun --from tcp+framed[maxFrame=4096]://127.0.0.1:${SFR}                  --to udp://127.0.0.1:${UE} --log info > framed_tcp_server.log 2>&1 & echo $! > framed_tcp_server.pid)
-        (nohup ./netx tun --from tcp+tlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${STLSPSK} --to tcp://127.0.0.1:${TE} --log info > tlspsk_server.log 2>&1 & echo $! > tlspsk_server.pid)
+        echo "Starting echo servers..."
+        ./tcp_echo 127.0.0.1:${TE} > tcp_echo.log 2>&1 &
+        ./udp_echo 127.0.0.1:${UE} > udp_echo.log 2>&1 &
 
-        # start client tunnels (accept local on left, connect to server with secure chain on right)
-        (nohup ./netx tun --from tcp://127.0.0.1:${CTLS}    --to tcp+tls[cert=server.crt]://127.0.0.1:${STLS}     --log info > tls_client.log 2>&1 & echo $! > tls_client.pid)
-        (nohup ./netx tun --from udp://127.0.0.1:${CDTLS}  --to udp+dtls[cert=server.crt]://127.0.0.1:${SDTLS}   --log info > dtls_client.log 2>&1 & echo $! > dtls_client.pid)
-        (nohup ./netx tun --from udp://127.0.0.1:${CDTLSP} --to udp+dtlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${SDTLSP} --log info > dtlspsk_client.log 2>&1 & echo $! > dtlspsk_client.pid)
-        (nohup ./netx tun --from tcp://127.0.0.1:${CAESCT} --to tcp+buffered[buf=8192]+framed[maxFrame=4096]+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCT} --log info > aesgcm_tcp_client.log 2>&1 & echo $! > aesgcm_tcp_client.pid)
-        (nohup ./netx tun --from udp://127.0.0.1:${CAESCU} --to udp+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCU} --log info > aesgcm_udp_client.log 2>&1 & echo $! > aesgcm_udp_client.pid)
-        (nohup ./netx tun --from udp://127.0.0.1:${CFR}    --to tcp+framed[maxFrame=4096]://127.0.0.1:${SFR}      --log info > framed_tcp_client.log 2>&1 & echo $! > framed_tcp_client.pid)
-        (nohup ./netx tun --from tcp://127.0.0.1:${CTLSPSK} --to tcp+tlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${STLSPSK} --log info > tlspsk_client.log 2>&1 & echo $! > tlspsk_client.pid)
+        echo "Starting server tunnels..."
+        ./netx tun --from tcp+tls[cert=server.crt,key=server.key]://127.0.0.1:${STLS}                                    --to tcp://127.0.0.1:${TE} --log info > tls_server.log        2>&1 &
+        ./netx tun --from udp+dtls[cert=server.crt,key=server.key]://127.0.0.1:${SDTLS}                                  --to udp://127.0.0.1:${UE} --log info > dtls_server.log       2>&1 &
+        ./netx tun --from udp+dtlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${SDTLSP}                               --to udp://127.0.0.1:${UE} --log info > dtlspsk_server.log    2>&1 &
+        ./netx tun --from tcp+buffered[buf=8192]+framed[maxFrame=4096]+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCT}  --to tcp://127.0.0.1:${TE} --log info > aesgcm_tcp_server.log 2>&1 &
+        ./netx tun --from udp+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCU}                                           --to udp://127.0.0.1:${UE} --log info > aesgcm_udp_server.log 2>&1 &
+        ./netx tun --from tcp+framed[maxFrame=4096]://127.0.0.1:${SFR}                                                   --to udp://127.0.0.1:${UE} --log info > framed_tcp_server.log 2>&1 &
+        ./netx tun --from tcp+tlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${STLSPSK}                               --to tcp://127.0.0.1:${TE} --log info > tlspsk_server.log     2>&1 &
+        ./netx tun --from tcp+ssh[hostKey=ssh_server_key,authKey=ssh_client_key.pub]://127.0.0.1:${SSSH}                 --to tcp://127.0.0.1:${TE} --log info > ssh_server.log        2>&1 &
+        ./netx tun --from tcp+tls[cert=server.crt,key=server.key]://127.0.0.1:${SUTLS}                                   --to tcp://127.0.0.1:${TE} --log info > utls_server.log       2>&1 &
 
-        # allow listeners to start
+        echo "Starting client tunnels..."
+        ./netx tun --from tcp://127.0.0.1:${CTLS}    --to tcp+tls[cert=server.crt]://127.0.0.1:${STLS}                                                   --log info > tls_client.log         2>&1 &
+        ./netx tun --from udp://127.0.0.1:${CDTLS}   --to udp+dtls[cert=server.crt]://127.0.0.1:${SDTLS}                                                 --log info > dtls_client.log        2>&1 &
+        ./netx tun --from udp://127.0.0.1:${CDTLSP}  --to udp+dtlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${SDTLSP}                               --log info > dtlspsk_client.log     2>&1 &
+        ./netx tun --from tcp://127.0.0.1:${CAESCT}  --to tcp+buffered[buf=8192]+framed[maxFrame=4096]+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCT}  --log info > aesgcm_tcp_client.log  2>&1 &
+        ./netx tun --from udp://127.0.0.1:${CAESCU}  --to udp+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCU}                                           --log info > aesgcm_udp_client.log  2>&1 &
+        ./netx tun --from udp://127.0.0.1:${CFR}     --to tcp+framed[maxFrame=4096]://127.0.0.1:${SFR}                                                   --log info > framed_tcp_client.log  2>&1 &
+        ./netx tun --from tcp://127.0.0.1:${CTLSPSK} --to tcp+tlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${STLSPSK}                               --log info > tlspsk_client.log      2>&1 &
+        ./netx tun --from tcp://127.0.0.1:${CSSH}    --to tcp+ssh[hostKey=ssh_server_key.pub,user=testuser,key=ssh_client_key]://127.0.0.1:${SSSH}       --log info > ssh_client.log         2>&1 &
+        ./netx tun --from tcp://127.0.0.1:${CUTLS}   --to tcp+utls[cert=server.crt,hello=chrome]://127.0.0.1:${SUTLS}                                    --log info > utls_client.log        2>&1 &
+
         sleep 2
+
+        echo "Running tests..."
         pass=0; fail=0
         run_tcp(){ name=$1; addr=$2; msg=$3; out=$(./tcp_client "$addr" "$msg" || true); if [ "$out" = "$msg" ]; then echo "PASS $name"; pass=$((pass+1)); else echo "FAIL $name -> got: $out"; fail=$((fail+1)); fi }
         run_udp(){ name=$1; addr=$2; msg=$3; out=$(./udp_client "$addr" "$msg" || true); if [ "$out" = "$msg" ]; then echo "PASS $name"; pass=$((pass+1)); else echo "FAIL $name -> got: $out"; fail=$((fail+1)); fi }
-        run_tcp TLS           127.0.0.1:${CTLS}  hello_tls
-        run_udp DTLS          127.0.0.1:${CDTLS} hello_dtls
-        run_udp DTLSPSK       127.0.0.1:${CDTLSP} hello_dtlspsk
-        run_tcp AESGCM_TCP    127.0.0.1:${CAESCT} hello_aesgcm_tcp
-        run_udp AESGCM_UDP    127.0.0.1:${CAESCU} hello_aesgcm_udp
-        run_udp FRAMED_TCP_BR 127.0.0.1:${CFR}    hello_udp_over_tcp
-        if [ "${E2E_INCLUDE_TLSPSK:-}" != "" ]; then
-          run_tcp TLSPSK        127.0.0.1:${CTLSPSK} hello_tlspsk || true
-        fi
+        run_tcp TLS           127.0.0.1:${CTLS}     hello_tls
+        run_udp DTLS          127.0.0.1:${CDTLS}    hello_dtls
+        run_udp DTLSPSK       127.0.0.1:${CDTLSP}   hello_dtlspsk
+        run_tcp AESGCM_TCP    127.0.0.1:${CAESCT}   hello_aesgcm_tcp
+        run_udp AESGCM_UDP    127.0.0.1:${CAESCU}   hello_aesgcm_udp
+        run_udp FRAMED_TCP_BR 127.0.0.1:${CFR}      hello_udp_over_tcp
+        run_tcp SSH           127.0.0.1:${CSSH}     hello_ssh
+        run_tcp UTLS          127.0.0.1:${CUTLS}    hello_utls
+        run_tcp TLSPSK        127.0.0.1:${CTLSPSK}  hello_tlspsk
         echo "RESULTS: pass=$pass fail=$fail"
+
+        echo "Cleaning up..."
+        pkill netx || true
+        pkill tcp_echo || true
+        pkill udp_echo || true
+
+        echo "Done."
         [ "$fail" -eq 0 ]

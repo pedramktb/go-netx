@@ -24,6 +24,8 @@ import (
 	pudp "github.com/pion/udp/v2"
 	tlswithpks "github.com/raff/tls-ext"
 	tlspks "github.com/raff/tls-psk"
+	utls "github.com/refraction-networking/utls"
+	"golang.org/x/crypto/ssh"
 )
 
 // chainStep represents a single segment in a connection chain (e.g. tls[key=...]).
@@ -167,19 +169,26 @@ Supported base transports:
 
 Supported wrappers:
 	- tls: Transport Layer Security
-		options: key (required for server), cert (required for server; optional on client to enable SPKI pinning), serverName (optional on client)
+		server params: key, cert
+		client params: cert (optional, for SPKI pinning), serverName (required if cert not provided)
+	- utls: TLS with client fingerprint camouflage via uTLS (github.com/refraction-networking/utls)
+		client params: cert (optional, for SPKI pinning), serverName (required if cert not provided), hello (optional, e.g. chrome, firefox, ios, android, safari, edge, randomized)
 	- dtls: Datagram Transport Layer Security
-		options: key (required for server), cert (required for server; optional on client to enable SPKI pinning)
+		server params: key, cert
+		client params: cert (optional, for SPKI pinning), serverName (required if cert not provided)
 	- tlspsk: TLS with pre-shared key. Cipher is TLS_DHE_PSK_WITH_AES_256_CBC_SHA. WARNING: This is not provided by the standard library, USE WITH CAUTION.
-		options: key (hex-encoded)
+		params: key (hex-encoded)
 	- dtlspsk: DTLS with pre-shared key. Cipher is TLS_PSK_WITH_AES_128_GCM_SHA256.
-		options: key (hex-encoded, required)
+		params: key (hex-encoded)
 	- aesgcm: AES-GCM encryption. A passive 12-byte handshake exchanges IVs.
-		options: key (hex-encoded, required), maxPacket (default 32768)
+		params: key (hex-encoded), maxPacket (optional, defaults to 32768)
 	- buffered: buffered read/write for better performance when using framing.
-		options: bufSize (default 4096)
+		params: bufSize (optional, defaults to 4096)
 	- framed: length-prefixed frames for transporting packet protocols or wrappers that need packet semantics over streams.
-		options: maxFrame (default 32768)
+		params: maxFrame (optional, defaults to 32768)
+	- ssh: SSH tunneling via "direct-tcpip" channels.
+		server params: hostKey, user (optional, required with pass), pass (optional), authKey (optional, required if no pass)
+		client options: hostKey, user, pass (optional), key (optional, required if no pass)
 
 Notes:
     - If 'cert' is provided on the client for tls/dtls, default validation is disabled and a manual SPKI (SubjectPublicKeyInfo) hash comparison is performed
@@ -333,7 +342,7 @@ func applyWrappers(conn net.Conn, steps []chainStep, from bool) (net.Conn, error
 			c = netx.NewBufConn(c, opts...)
 		case "framed":
 			opts := []netx.FramedConnOption{}
-			if v, ok := st.params["maxFrame"]; ok && strings.TrimSpace(v) != "" {
+			if v, ok := st.params["maxframe"]; ok && strings.TrimSpace(v) != "" {
 				max, err := strconv.Atoi(v)
 				if err != nil {
 					return nil, fmt.Errorf("invalid maxFrame size %q: %w", v, err)
@@ -384,10 +393,66 @@ func applyWrappers(conn net.Conn, steps []chainStep, from bool) (net.Conn, error
 					}
 					cfg.InsecureSkipVerify = true
 					cfg.VerifyPeerCertificate = verify
-
+				} else {
+					// Otherwise, require serverName
+					if sn, ok := st.params["servername"]; ok && strings.TrimSpace(sn) != "" {
+						cfg.ServerName = strings.TrimSpace(sn)
+					} else {
+						return nil, fmt.Errorf("tls client requires serverName or cert")
+					}
 				}
 				c = tls.Client(c, cfg)
 			}
+		case "utls":
+			if from {
+				return nil, fmt.Errorf("utls is client-side only")
+			}
+			cfg := &utls.Config{
+				MinVersion: tls.VersionTLS13,
+				MaxVersion: tls.VersionTLS13,
+			}
+			if cp, ok := st.params["cert"]; ok && strings.TrimSpace(cp) != "" {
+				verify, err := makeSPKIPinVerifierFromCertPath(cp)
+				if err != nil {
+					return nil, fmt.Errorf("utls client pin setup: %w", err)
+				}
+				cfg.InsecureSkipVerify = true
+				cfg.VerifyPeerCertificate = verify
+			} else {
+				if sn, ok := st.params["servername"]; ok && strings.TrimSpace(sn) != "" {
+					cfg.ServerName = strings.TrimSpace(sn)
+				} else {
+					return nil, fmt.Errorf("utls client requires serverName or cert")
+				}
+			}
+			// Map hello profile.
+			hello := strings.ToLower(strings.TrimSpace(st.params["hello"]))
+			var id utls.ClientHelloID
+			switch hello {
+			case "", "chrome":
+				id = utls.HelloChrome_Auto
+			case "firefox":
+				id = utls.HelloFirefox_Auto
+			case "ios":
+				id = utls.HelloIOS_Auto
+			case "android":
+				id = utls.HelloAndroid_11_OkHttp
+			case "safari":
+				id = utls.HelloSafari_Auto
+			case "edge":
+				id = utls.HelloEdge_Auto
+			case "randomized":
+				id = utls.HelloRandomizedALPN
+			case "randomizednoalpn":
+				id = utls.HelloRandomized
+			default:
+				return nil, fmt.Errorf("unknown utls hello profile %q", hello)
+			}
+			uconn := utls.UClient(c, cfg, id)
+			if err := uconn.Handshake(); err != nil {
+				return nil, fmt.Errorf("utls handshake: %w", err)
+			}
+			c = uconn
 		case "dtls":
 			var err error
 			cfg := &dtls.Config{}
@@ -406,6 +471,13 @@ func applyWrappers(conn net.Conn, steps []chainStep, from bool) (net.Conn, error
 					}
 					cfg.InsecureSkipVerify = true
 					cfg.VerifyPeerCertificate = verify
+				} else {
+					// Otherwise, require serverName
+					if sn, ok := st.params["servername"]; ok && strings.TrimSpace(sn) != "" {
+						cfg.ServerName = strings.TrimSpace(sn)
+					} else {
+						return nil, fmt.Errorf("dtls client requires serverName or cert")
+					}
 				}
 				c, err = dtls.Client(dtlsnet.PacketConnFromConn(c), c.RemoteAddr(), cfg)
 			}
@@ -423,7 +495,7 @@ func applyWrappers(conn net.Conn, steps []chainStep, from bool) (net.Conn, error
 			}
 			identity := strings.TrimSpace(st.params["identity"])
 			if identity == "" {
-				return nil, fmt.Errorf("dtlspsk requires identity")
+				return nil, fmt.Errorf("tlspsk requires identity")
 			}
 			cfg := &tlswithpks.Config{
 				MinVersion: tls.VersionTLS12,
@@ -468,6 +540,103 @@ func applyWrappers(conn net.Conn, steps []chainStep, from bool) (net.Conn, error
 				}
 			} else {
 				c, err = dtls.Client(dtlsnet.PacketConnFromConn(c), c.RemoteAddr(), cfg)
+				if err != nil {
+					return nil, err
+				}
+			}
+		case "ssh":
+			if from {
+				cfg := &ssh.ServerConfig{}
+				if hp := strings.TrimSpace(st.params["hostkey"]); hp != "" {
+					keyData, err := os.ReadFile(hp)
+					if err != nil {
+						return nil, fmt.Errorf("read hostkey: %w", err)
+					}
+					private, err := ssh.ParsePrivateKey(keyData)
+					if err != nil {
+						return nil, fmt.Errorf("parse hostkey: %w", err)
+					}
+					cfg.AddHostKey(private)
+				}
+				if p := strings.TrimSpace(st.params["pass"]); p != "" {
+					cfg.PasswordCallback = func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
+						if c.User() == strings.TrimSpace(st.params["user"]) && string(pass) == p {
+							return nil, nil
+						}
+						return nil, fmt.Errorf("invalid user or password")
+					}
+				}
+				if ak := strings.TrimSpace(st.params["authkey"]); ak != "" {
+					// Load authorized key file
+					data, err := os.ReadFile(ak)
+					if err != nil {
+						return nil, fmt.Errorf("read authkey: %w", err)
+					}
+					pubKey, _, _, _, err := ssh.ParseAuthorizedKey(data)
+					if err != nil {
+						return nil, fmt.Errorf("parse authkey: %w", err)
+					}
+					cfg.PublicKeyCallback = func(c ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+						if bytes.Equal(key.Marshal(), pubKey.Marshal()) {
+							return nil, nil
+						}
+						return nil, fmt.Errorf("unauthorized public key")
+					}
+				}
+				if cfg.PasswordCallback == nil && cfg.PublicKeyCallback == nil {
+					return nil, fmt.Errorf("ssh server requires pass or authKey")
+				}
+				var err error
+				c, err = netx.NewSSHServerConn(c, cfg)
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				cfg := &ssh.ClientConfig{
+					User: strings.TrimSpace(st.params["user"]),
+				}
+				if p := strings.TrimSpace(st.params["pass"]); p != "" {
+					cfg.Auth = append(cfg.Auth, ssh.Password(p))
+				}
+				if k := strings.TrimSpace(st.params["key"]); k != "" {
+					keyData, err := os.ReadFile(k)
+					if err != nil {
+						return nil, fmt.Errorf("read private key: %w", err)
+					}
+					signer, err := ssh.ParsePrivateKey(keyData)
+					if err != nil {
+						return nil, fmt.Errorf("parse private key: %w", err)
+					}
+					cfg.Auth = append(cfg.Auth, ssh.PublicKeys(signer))
+				}
+				if hk := strings.TrimSpace(st.params["hostkey"]); hk != "" {
+					keyData, err := os.ReadFile(hk)
+					if err != nil {
+						return nil, fmt.Errorf("read hostkey: %w", err)
+					}
+					hostKey, _, _, _, err := ssh.ParseAuthorizedKey(keyData)
+					if err != nil {
+						return nil, fmt.Errorf("parse hostkey: %w", err)
+					}
+					cfg.HostKeyCallback = func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+						if bytes.Equal(key.Marshal(), hostKey.Marshal()) {
+							return nil
+						}
+						return fmt.Errorf("host key mismatch")
+					}
+				}
+				if cfg.User == "" || len(cfg.Auth) == 0 {
+					return nil, fmt.Errorf("ssh client requires user and (pass or key)")
+				}
+				if cfg.HostKeyCallback == nil {
+					if strings.ToLower(strings.TrimSpace(st.params["insecure"])) == "true" {
+						cfg.HostKeyCallback = ssh.InsecureIgnoreHostKey()
+					} else {
+						return nil, fmt.Errorf("ssh client requires hostKey or insecure=true")
+					}
+				}
+				var err error
+				c, err = netx.NewSSHClientConn(c, cfg)
 				if err != nil {
 					return nil, err
 				}
