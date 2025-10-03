@@ -77,7 +77,7 @@ func newUDPPair(t *testing.T) (*net.UDPConn, *net.UDPConn) {
 	return a, b
 }
 
-func TestE2E_UDP_over_TCP_TunMasters(t *testing.T) {
+func TestInt_UDP_over_TCP_TunMasters(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	logger := &memLogger{}
@@ -182,7 +182,7 @@ func TestE2E_UDP_over_TCP_TunMasters(t *testing.T) {
 // - TLS route: expects a tls.Conn and forwards to server UDPTLS peer
 // - Plain route: handles non-TLS and forwards to server UDPPlain peer
 // Two client tunnels are created: one plain over framed stream, one framed over TLS.
-func TestE2E_TunMasterRouting_PlainAndTLS(t *testing.T) {
+func TestInt_TunMasterRouting_PlainAndTLS(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	logger := &memLogger{}

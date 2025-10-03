@@ -18,15 +18,22 @@ type bufConn struct {
 	bw *bufio.Writer
 }
 
-type bufConnOption func(*bufConn)
+type BufConnOption func(*bufConn)
 
-func WithBufWriterSize(size int) bufConnOption {
+func WithBufSize(size int) BufConnOption {
+	return func(bc *bufConn) {
+		bc.br = bufio.NewReaderSize(bc.bc, size)
+		bc.bw = bufio.NewWriterSize(bc.bc, size)
+	}
+}
+
+func WithBufWriterSize(size int) BufConnOption {
 	return func(bc *bufConn) {
 		bc.bw = bufio.NewWriterSize(bc.bc, size)
 	}
 }
 
-func WithBufReaderSize(size int) bufConnOption {
+func WithBufReaderSize(size int) BufConnOption {
 	return func(bc *bufConn) {
 		bc.br = bufio.NewReaderSize(bc.bc, size)
 	}
@@ -34,7 +41,7 @@ func WithBufReaderSize(size int) bufConnOption {
 
 // NewBufConn wraps a net.Conn with buffered reader and writer.
 // By default, the buffer size is 4KB. Use WithBufWriterSize and WithBufReaderSize to customize the sizes.
-func NewBufConn(c net.Conn, opts ...bufConnOption) BufConn {
+func NewBufConn(c net.Conn, opts ...BufConnOption) BufConn {
 	bc := &bufConn{
 		bc: c,
 		br: bufio.NewReader(c),

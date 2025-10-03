@@ -25,3 +25,4 @@ jobs:
       - run: task deps
       - run: task lint
       - run: task test
+      - run: task e2e:tun
