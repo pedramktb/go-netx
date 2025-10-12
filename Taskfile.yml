@@ -25,19 +25,19 @@ tasks:
     desc: Build binaries and libraries
     cmds:
       # Linux binaries and shared libraries
-      - env GOOS=linux GOARCH=amd64 go build -o build/netx_linux_x64 cmd/netx/main.go
-      - env GOOS=linux GOARCH=arm64 go build -o build/netx_linux_arm64 cmd/netx/main.go
+      - env GOOS=linux GOARCH=amd64 go build -o build/netx_linux_x64 cmd/netx/*.go
+      - env GOOS=linux GOARCH=arm64 go build -o build/netx_linux_arm64 cmd/netx/*.go
       # - env GOOS=linux GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-linux-gnu-gcc go build -buildmode=c-shared -o build/libnetx_linux_x64.so cmd/netx/lib/main.go
       # - env GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-gnu-gcc go build -buildmode=c-shared -o build/libnetx_linux_arm64.so cmd/netx/lib/main.go
       # # Windows binaries and shared libraries
-      - env GOOS=windows GOARCH=amd64 go build -o build/netx_windows_x64.exe cmd/netx/main.go
-      - env GOOS=windows GOARCH=arm64 go build -o build/netx_windows_arm64.exe cmd/netx/main.go
+      - env GOOS=windows GOARCH=amd64 go build -o build/netx_windows_x64.exe cmd/netx/*.go
+      - env GOOS=windows GOARCH=arm64 go build -o build/netx_windows_arm64.exe cmd/netx/*.go
       # - env GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc go build -buildmode=c-shared -o build/libnetx_windows_x64.dll cmd/netx/lib/main.go
       # # aarch64-w64-mingw32-gcc is experimental and not available
       # # - env GOOS=windows GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-w64-mingw32-gcc go build -buildmode=c-shared -o build/libenetx_windows_arm64.dll cmd/lib/main.go
       # # macOS binaries
-      - env GOOS=darwin GOARCH=amd64 go build -o build/netx_macos_x64 cmd/netx/main.go
-      - env GOOS=darwin GOARCH=arm64 go build -o build/netx_macos_arm64 cmd/netx/main.go
+      - env GOOS=darwin GOARCH=amd64 go build -o build/netx_macos_x64 cmd/netx/*.go
+      - env GOOS=darwin GOARCH=arm64 go build -o build/netx_macos_arm64 cmd/netx/*.go
       # # Android shared libraries
       # - env GOOS=android GOARCH=amd64 CGO_ENABLED=1 CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android26-clang go build -buildmode=c-shared -o build/libnetx_android_x64.so cmd/netx/lib/main.go
       # - env GOOS=android GOARCH=arm64 CGO_ENABLED=1 CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang go build -buildmode=c-shared -o build/libnetx_android_arm64.so cmd/netx/lib/main.go
@@ -126,26 +126,26 @@ tasks:
         ./udp_echo 127.0.0.1:${UE} > udp_echo.log 2>&1 &
 
         echo "Starting server tunnels..."
-        ./netx tun --from tcp+tls[cert=server.crt,key=server.key]://127.0.0.1:${STLS}                                    --to tcp://127.0.0.1:${TE} --log info > tls_server.log        2>&1 &
-        ./netx tun --from udp+dtls[cert=server.crt,key=server.key]://127.0.0.1:${SDTLS}                                  --to udp://127.0.0.1:${UE} --log info > dtls_server.log       2>&1 &
-        ./netx tun --from udp+dtlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${SDTLSP}                               --to udp://127.0.0.1:${UE} --log info > dtlspsk_server.log    2>&1 &
-        ./netx tun --from tcp+buffered[buf=8192]+framed[maxFrame=4096]+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCT}  --to tcp://127.0.0.1:${TE} --log info > aesgcm_tcp_server.log 2>&1 &
-        ./netx tun --from udp+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCU}                                           --to udp://127.0.0.1:${UE} --log info > aesgcm_udp_server.log 2>&1 &
-        ./netx tun --from tcp+framed[maxFrame=4096]://127.0.0.1:${SFR}                                                   --to udp://127.0.0.1:${UE} --log info > framed_tcp_server.log 2>&1 &
-        ./netx tun --from tcp+tlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${STLSPSK}                               --to tcp://127.0.0.1:${TE} --log info > tlspsk_server.log     2>&1 &
-        ./netx tun --from tcp+ssh[hostKey=ssh_server_key,authKey=ssh_client_key.pub]://127.0.0.1:${SSSH}                 --to tcp://127.0.0.1:${TE} --log info > ssh_server.log        2>&1 &
-        ./netx tun --from tcp+tls[cert=server.crt,key=server.key]://127.0.0.1:${SUTLS}                                   --to tcp://127.0.0.1:${TE} --log info > utls_server.log       2>&1 &
+        ./netx tun --from "tcp+tls[cert=$(xxd -p server.crt | tr -d '\n'),key=$(xxd -p server.key | tr -d '\n')]://127.0.0.1:${STLS}"   --to "tcp://127.0.0.1:${TE}"  --log info > tls_server.log         2>&1 &
+        ./netx tun --from "udp+dtls[cert=$(xxd -p server.crt | tr -d '\n'),key=$(xxd -p server.key | tr -d '\n')]://127.0.0.1:${SDTLS}" --to "udp://127.0.0.1:${UE}"  --log info > dtls_server.log        2>&1 &
+        ./netx tun --from "udp+dtlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${SDTLSP}"                                --to "udp://127.0.0.1:${UE}"  --log info > dtlspsk_server.log     2>&1 &
+        ./netx tun --from "tcp+buffered[size=8192]+framed[maxsize=4096]+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCT}"   --to "tcp://127.0.0.1:${TE}"  --log info > aesgcm_tcp_server.log  2>&1 &
+        ./netx tun --from "udp+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCU}"                                            --to "udp://127.0.0.1:${UE}"  --log info > aesgcm_udp_server.log  2>&1 &
+        ./netx tun --from "tcp+framed[maxsize=4096]://127.0.0.1:${SFR}"                                                     --to "udp://127.0.0.1:${UE}"  --log info > framed_tcp_server.log  2>&1 &
+        ./netx tun --from "tcp+tlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${STLSPSK}"                                --to "tcp://127.0.0.1:${TE}"  --log info > tlspsk_server.log      2>&1 &
+        ./netx tun --from "tcp+ssh[key=$(xxd -p ssh_server_key | tr -d '\n'),pubkey=$(xxd -p ssh_client_key.pub | tr -d '\n')]://127.0.0.1:${SSSH}"                       --to "tcp://127.0.0.1:${TE}"  --log info > ssh_server.log         2>&1 &
+        ./netx tun --from "tcp+tls[cert=$(xxd -p server.crt | tr -d '\n'),key=$(xxd -p server.key | tr -d '\n')]://127.0.0.1:${SUTLS}"  --to "tcp://127.0.0.1:${TE}"  --log info > utls_server.log        2>&1 &
 
         echo "Starting client tunnels..."
-        ./netx tun --from tcp://127.0.0.1:${CTLS}    --to tcp+tls[cert=server.crt]://127.0.0.1:${STLS}                                                   --log info > tls_client.log         2>&1 &
-        ./netx tun --from udp://127.0.0.1:${CDTLS}   --to udp+dtls[cert=server.crt]://127.0.0.1:${SDTLS}                                                 --log info > dtls_client.log        2>&1 &
-        ./netx tun --from udp://127.0.0.1:${CDTLSP}  --to udp+dtlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${SDTLSP}                               --log info > dtlspsk_client.log     2>&1 &
-        ./netx tun --from tcp://127.0.0.1:${CAESCT}  --to tcp+buffered[buf=8192]+framed[maxFrame=4096]+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCT}  --log info > aesgcm_tcp_client.log  2>&1 &
-        ./netx tun --from udp://127.0.0.1:${CAESCU}  --to udp+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCU}                                           --log info > aesgcm_udp_client.log  2>&1 &
-        ./netx tun --from udp://127.0.0.1:${CFR}     --to tcp+framed[maxFrame=4096]://127.0.0.1:${SFR}                                                   --log info > framed_tcp_client.log  2>&1 &
-        ./netx tun --from tcp://127.0.0.1:${CTLSPSK} --to tcp+tlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${STLSPSK}                               --log info > tlspsk_client.log      2>&1 &
-        ./netx tun --from tcp://127.0.0.1:${CSSH}    --to tcp+ssh[hostKey=ssh_server_key.pub,user=testuser,key=ssh_client_key]://127.0.0.1:${SSSH}       --log info > ssh_client.log         2>&1 &
-        ./netx tun --from tcp://127.0.0.1:${CUTLS}   --to tcp+utls[cert=server.crt,hello=chrome]://127.0.0.1:${SUTLS}                                    --log info > utls_client.log        2>&1 &
+        ./netx tun --from "tcp://127.0.0.1:${CTLS}"     --to "tcp+tls[cert=$(xxd -p server.crt | tr -d '\n')]://127.0.0.1:${STLS}"                                  --log info > tls_client.log         2>&1 &
+        ./netx tun --from "udp://127.0.0.1:${CDTLS}"    --to "udp+dtls[cert=$(xxd -p server.crt | tr -d '\n')]://127.0.0.1:${SDTLS}"                                --log info > dtls_client.log        2>&1 &
+        ./netx tun --from "udp://127.0.0.1:${CDTLSP}"   --to "udp+dtlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${SDTLSP}"                               --log info > dtlspsk_client.log     2>&1 &
+        ./netx tun --from "tcp://127.0.0.1:${CAESCT}"   --to "tcp+buffered[size=8192]+framed[maxsize=4096]+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCT}"  --log info > aesgcm_tcp_client.log  2>&1 &
+        ./netx tun --from "udp://127.0.0.1:${CAESCU}"   --to "udp+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCU}"                                           --log info > aesgcm_udp_client.log  2>&1 &
+        ./netx tun --from "udp://127.0.0.1:${CFR}"      --to "tcp+framed[maxsize=4096]://127.0.0.1:${SFR}"                                                    --log info > framed_tcp_client.log  2>&1 &
+        ./netx tun --from "tcp://127.0.0.1:${CTLSPSK}"  --to "tcp+tlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${STLSPSK}"                               --log info > tlspsk_client.log      2>&1 &
+        ./netx tun --from "tcp://127.0.0.1:${CSSH}"     --to "tcp+ssh[pubkey=$(xxd -p ssh_server_key.pub | tr -d '\n'),key=$(xxd -p ssh_client_key | tr -d '\n')]://127.0.0.1:${SSSH}"                      --log info > ssh_client.log         2>&1 &
+        ./netx tun --from "tcp://127.0.0.1:${CUTLS}"    --to "tcp+utls[cert=$(xxd -p server.crt | tr -d '\n'),hello=chrome]://127.0.0.1:${SUTLS}"                   --log info > utls_client.log        2>&1 &
 
         sleep 2
 

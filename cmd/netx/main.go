@@ -3,39 +3,68 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
-	tuncmd "github.com/pedramktb/go-netx/cmd/netx/tun"
+	"github.com/spf13/cobra"
 )
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	if len(os.Args) < 2 {
-		usage()
-		os.Exit(2)
+	var logLevel string
+
+	cmd := &cobra.Command{
+		Use:           "netx [command]",
+		Short:         "Small networking toolbox",
+		Long:          "netx is a small networking toolbox.",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			lvl, err := parseLogLevel(logLevel)
+			if err != nil {
+				return err
+			}
+			slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl})))
+			return nil
+		},
 	}
-	switch os.Args[1] {
-	case "tun":
-		tuncmd.Run(ctx, cancel, os.Args[2:])
-	case "-h", "--help", "help":
-		usage()
-	default:
-		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n", os.Args[1])
-		usage()
-		os.Exit(2)
+
+	defaultHelp := cmd.HelpFunc()
+	cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		defaultHelp(cmd, args)
+		fmt.Fprintln(cmd.OutOrStdout())
+		fmt.Fprint(cmd.OutOrStdout(), uriFormat)
+	})
+
+	cmd.PersistentFlags().StringVar(&logLevel, "log", "info", "log level: debug|info|warn|error")
+
+	cmd.AddCommand(tun(cancel))
+
+	if err := cmd.ExecuteContext(ctx); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 }
 
-func usage() {
-	fmt.Fprintf(os.Stderr, `netx - small networking toolbox
-
-Subcommands:
-  tun    Relay between two endpoints with chainable transforms.
-
-Run 'netx <subcommand> --help' for details.
-`)
+func parseLogLevel(level string) (slog.Level, error) {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "", "info":
+		return slog.LevelInfo, nil
+	case "debug":
+		return slog.LevelDebug, nil
+	case "warn", "warning":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	default:
+		return 0, fmt.Errorf("invalid log level %q", level)
+	}
 }

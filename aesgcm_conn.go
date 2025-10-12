@@ -13,7 +13,7 @@ import (
 )
 
 type aesgcmConn struct {
-	bc   net.Conn
+	net.Conn
 	aead cipher.AEAD
 	wiv  [12]byte
 	riv  [12]byte
@@ -21,16 +21,18 @@ type aesgcmConn struct {
 	// sequence number for nonce derivation, incremented atomically
 	seq atomic.Uint64
 
-	// Maximum size of a single ciphertext packet we accept on Read.
-	// This should be >= 8 (seq) + plaintext + aead.Overhead().
 	maxPacketSize int
 }
 
 type AESGCMOption func(*aesgcmConn)
 
 // WithMaxPacket sets the maximum ciphertext packet size accepted on Read.
-// Default is 32KB.
-func WithMaxPacket(size int) AESGCMOption { return func(c *aesgcmConn) { c.maxPacketSize = size } }
+// Default is 32KB. This should be >= 8 (seq) + plaintext + aead.Overhead().
+func WithAESGCMMaxPacket(size uint32) AESGCMOption {
+	return func(c *aesgcmConn) {
+		c.maxPacketSize = int(size)
+	}
+}
 
 // NewAESGCMConn constructs a new AES-GCM wrapper around a packet-based net.Conn.
 // Key must be 16, 24, or 32 bytes (AES-128/192/256).
@@ -56,7 +58,7 @@ func NewAESGCMConn(c net.Conn, key []byte, opts ...AESGCMOption) (net.Conn, erro
 		return nil, err
 	}
 	agc := &aesgcmConn{
-		bc:            c,
+		Conn:          c,
 		aead:          a,
 		maxPacketSize: 32 * 1024}
 	for _, opt := range opts {
@@ -107,7 +109,7 @@ func NewAESGCMConn(c net.Conn, key []byte, opts ...AESGCMOption) (net.Conn, erro
 // If p is too small for the decrypted payload, io.ErrShortBuffer is returned.
 func (c *aesgcmConn) Read(p []byte) (int, error) {
 	buf := make([]byte, c.maxPacketSize)
-	n, err := c.bc.Read(buf)
+	n, err := c.Conn.Read(buf)
 	if err != nil {
 		return 0, err
 	}
@@ -157,7 +159,7 @@ func (c *aesgcmConn) Write(p []byte) (int, error) {
 	ct := c.aead.Seal(buf[8:8], nonce[:], p, buf[:8])
 	buf = buf[:8+len(ct)]
 
-	n, err := c.bc.Write(buf)
+	n, err := c.Conn.Write(buf)
 	if err != nil {
 		return 0, err
 	}
@@ -168,10 +170,3 @@ func (c *aesgcmConn) Write(p []byte) (int, error) {
 	// Satisfy io.Writer contract: on success, return len(p) bytes written.
 	return len(p), nil
 }
-
-func (c *aesgcmConn) Close() error                       { return c.bc.Close() }
-func (c *aesgcmConn) LocalAddr() net.Addr                { return c.bc.LocalAddr() }
-func (c *aesgcmConn) RemoteAddr() net.Addr               { return c.bc.RemoteAddr() }
-func (c *aesgcmConn) SetDeadline(t time.Time) error      { return c.bc.SetDeadline(t) }
-func (c *aesgcmConn) SetReadDeadline(t time.Time) error  { return c.bc.SetReadDeadline(t) }
-func (c *aesgcmConn) SetWriteDeadline(t time.Time) error { return c.bc.SetWriteDeadline(t) }

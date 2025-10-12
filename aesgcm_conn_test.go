@@ -148,8 +148,8 @@ func TestAESGCM_MaxPacketWrite(t *testing.T) {
 		es   error
 		done = make(chan struct{}, 2)
 	)
-	go func() { c, ec = netx.NewAESGCMConn(fc, key, netx.WithMaxPacket(48)); done <- struct{}{} }()
-	go func() { _, es = netx.NewAESGCMConn(fs, key, netx.WithMaxPacket(48)); done <- struct{}{} }()
+	go func() { c, ec = netx.NewAESGCMConn(fc, key, netx.WithAESGCMMaxPacket(48)); done <- struct{}{} }()
+	go func() { _, es = netx.NewAESGCMConn(fs, key, netx.WithAESGCMMaxPacket(48)); done <- struct{}{} }()
 	<-done
 	<-done
 	if ec != nil {

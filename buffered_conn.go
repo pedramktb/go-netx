@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"errors"
 	"net"
-	"time"
 )
 
 type BufConn interface {
@@ -13,29 +12,29 @@ type BufConn interface {
 }
 
 type bufConn struct {
-	bc net.Conn
+	net.Conn
 	br *bufio.Reader
 	bw *bufio.Writer
 }
 
 type BufConnOption func(*bufConn)
 
-func WithBufSize(size int) BufConnOption {
+func WithBufSize(size uint32) BufConnOption {
 	return func(bc *bufConn) {
-		bc.br = bufio.NewReaderSize(bc.bc, size)
-		bc.bw = bufio.NewWriterSize(bc.bc, size)
+		bc.br = bufio.NewReaderSize(bc.Conn, int(size))
+		bc.bw = bufio.NewWriterSize(bc.Conn, int(size))
 	}
 }
 
-func WithBufWriterSize(size int) BufConnOption {
+func WithBufWriterSize(size uint32) BufConnOption {
 	return func(bc *bufConn) {
-		bc.bw = bufio.NewWriterSize(bc.bc, size)
+		bc.bw = bufio.NewWriterSize(bc.Conn, int(size))
 	}
 }
 
-func WithBufReaderSize(size int) BufConnOption {
+func WithBufReaderSize(size uint32) BufConnOption {
 	return func(bc *bufConn) {
-		bc.br = bufio.NewReaderSize(bc.bc, size)
+		bc.br = bufio.NewReaderSize(bc.Conn, int(size))
 	}
 }
 
@@ -43,9 +42,9 @@ func WithBufReaderSize(size int) BufConnOption {
 // By default, the buffer size is 4KB. Use WithBufWriterSize and WithBufReaderSize to customize the sizes.
 func NewBufConn(c net.Conn, opts ...BufConnOption) BufConn {
 	bc := &bufConn{
-		bc: c,
-		br: bufio.NewReader(c),
-		bw: bufio.NewWriter(c),
+		Conn: c,
+		br:   bufio.NewReader(c),
+		bw:   bufio.NewWriter(c),
 	}
 	for _, opt := range opts {
 		opt(bc)
@@ -64,17 +63,12 @@ func (c *bufConn) Close() error {
 			err = errors.Join(err, fErr)
 		}
 	}
-	if c.bc != nil {
-		if cErr := c.bc.Close(); cErr != nil {
+	if c.Conn != nil {
+		if cErr := c.Conn.Close(); cErr != nil {
 			err = errors.Join(err, cErr)
 		}
 	}
 	return err
 }
-func (c *bufConn) LocalAddr() net.Addr                { return c.bc.LocalAddr() }
-func (c *bufConn) RemoteAddr() net.Addr               { return c.bc.RemoteAddr() }
-func (c *bufConn) SetDeadline(t time.Time) error      { return c.bc.SetDeadline(t) }
-func (c *bufConn) SetReadDeadline(t time.Time) error  { return c.bc.SetReadDeadline(t) }
-func (c *bufConn) SetWriteDeadline(t time.Time) error { return c.bc.SetWriteDeadline(t) }
 
 func (c *bufConn) Flush() error { return c.bw.Flush() }
