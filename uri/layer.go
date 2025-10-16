@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -63,10 +64,19 @@ func (ls *Layers) UnmarshalText(text []byte) error {
 	return nil
 }
 
+func (ls Layers) MarshalJSON() ([]byte, error) {
+	return json.Marshal(ls.Layers)
+}
+
+func (ls *Layers) UnmarshalJSON(data []byte) error {
+	return json.Unmarshal(data, &ls.Layers)
+}
+
 type Layer struct {
 	Listener bool
-	string
-	wrap func(net.Conn) (net.Conn, error)
+	Prot     string
+	Params   map[string]string
+	wrap     func(net.Conn) (net.Conn, error)
 }
 
 func (l Layer) Wrap(conn net.Conn) (net.Conn, error) {
@@ -77,24 +87,31 @@ func (l Layer) Wrap(conn net.Conn) (net.Conn, error) {
 }
 
 func (l Layer) String() string {
-	return l.string
+	pairs := make([]string, 0, len(l.Params))
+	for k, v := range l.Params {
+		pairs = append(pairs, k+"="+v)
+	}
+	if len(pairs) > 0 {
+		return fmt.Sprintf("%s[%s]", l.Prot, strings.Join(pairs, ","))
+	}
+	return l.Prot
 }
 
 func (l Layer) MarshalText() ([]byte, error) {
-	return []byte(l.string), nil
+	return []byte(l.String()), nil
 }
 
 func (l *Layer) UnmarshalText(text []byte) error {
-	l.string = string(text)
+	str := string(text)
 
-	prot := strings.ToLower(strings.TrimSpace(l.string))
-	params := map[string]string{}
-	if idx := strings.Index(l.string, "["); idx != -1 {
-		if !strings.HasSuffix(l.string, "]") {
-			return fmt.Errorf("uri: missing ']' in layer %q", l.string)
+	l.Prot = strings.ToLower(strings.TrimSpace(str))
+	l.Params = map[string]string{}
+	if idx := strings.Index(str, "["); idx != -1 {
+		if !strings.HasSuffix(str, "]") {
+			return fmt.Errorf("uri: missing ']' in layer %q", str)
 		}
-		prot = strings.ToLower(strings.TrimSpace(l.string[:idx]))
-		for pair := range strings.SplitSeq(l.string[idx+1:len(l.string)-1], ",") {
+		l.Prot = strings.ToLower(strings.TrimSpace(str[:idx]))
+		for pair := range strings.SplitSeq(str[idx+1:len(str)-1], ",") {
 			kv := strings.SplitN(pair, "=", 2)
 			if len(kv) != 2 {
 				return fmt.Errorf("uri: invalid parameter %q", pair)
@@ -104,14 +121,14 @@ func (l *Layer) UnmarshalText(text []byte) error {
 			if key == "" {
 				return fmt.Errorf("uri: empty parameter key")
 			}
-			params[key] = value
+			l.Params[key] = value
 		}
 	}
 
-	switch prot {
+	switch l.Prot {
 	case "framed":
 		opts := []netx.FramedConnOption{}
-		for key, value := range params {
+		for key, value := range l.Params {
 			switch key {
 			case "maxsize":
 				maxSize, err := strconv.ParseUint(value, 10, 31)
@@ -128,7 +145,7 @@ func (l *Layer) UnmarshalText(text []byte) error {
 		}
 	case "buffered":
 		opts := []netx.BufConnOption{}
-		for key, value := range params {
+		for key, value := range l.Params {
 			switch key {
 			case "size":
 				size, err := strconv.ParseUint(value, 10, 31)
@@ -146,7 +163,7 @@ func (l *Layer) UnmarshalText(text []byte) error {
 	case "aesgcm":
 		aeskey := []byte{}
 		opts := []netx.AESGCMOption{}
-		for key, value := range params {
+		for key, value := range l.Params {
 			switch key {
 			case "key":
 				var err error
@@ -177,7 +194,7 @@ func (l *Layer) UnmarshalText(text []byte) error {
 		var pass string
 		var sshkey ssh.Signer // Host key for server, private key for client
 		var pubkey ssh.PublicKey
-		for key, value := range params {
+		for key, value := range l.Params {
 			switch key {
 			case "pass":
 				pass = value
@@ -261,7 +278,7 @@ func (l *Layer) UnmarshalText(text []byte) error {
 			MinVersion: tls.VersionTLS13,
 			MaxVersion: tls.VersionTLS13,
 		}
-		for key, value := range params {
+		for key, value := range l.Params {
 			switch key {
 			case "key":
 				var err error
@@ -322,7 +339,7 @@ func (l *Layer) UnmarshalText(text []byte) error {
 			MaxVersion: tls.VersionTLS13,
 		}
 		id := utls.HelloChrome_Auto
-		for key, value := range params {
+		for key, value := range l.Params {
 			switch key {
 			case "cert":
 				var err error
@@ -375,7 +392,7 @@ func (l *Layer) UnmarshalText(text []byte) error {
 	case "dtls":
 		var certKey, cert []byte
 		cfg := &dtls.Config{}
-		for key, value := range params {
+		for key, value := range l.Params {
 			switch key {
 			case "key":
 				var err error
@@ -429,7 +446,7 @@ func (l *Layer) UnmarshalText(text []byte) error {
 	case "tlspsk":
 		var identity string
 		var psk []byte
-		for key, value := range params {
+		for key, value := range l.Params {
 			switch key {
 			case "key":
 				var err error
@@ -473,7 +490,7 @@ func (l *Layer) UnmarshalText(text []byte) error {
 	case "dtlspsk":
 		var identity string
 		var psk []byte
-		for key, value := range params {
+		for key, value := range l.Params {
 			switch key {
 			case "key":
 				var err error

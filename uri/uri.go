@@ -9,8 +9,8 @@ type URI struct {
 	// This flag must be set if the URI is being applied to a listener (server side)
 	// The parser takes this into account when validating parameters
 	Listener bool
-	Scheme
-	Addr string
+	Scheme   `json:"scheme"`
+	Addr     string `json:"addr"`
 }
 
 func (u URI) String() string {

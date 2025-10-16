@@ -6,9 +6,9 @@ import (
 )
 
 type Scheme struct {
-	Listener bool
-	Transport
-	Layers Layers
+	Listener  bool
+	Transport `json:"transport"`
+	Layers    Layers `json:"layers"`
 }
 
 func (s Scheme) String() string {
