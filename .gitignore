@@ -1,0 +1,5 @@
+/.task/
+/build/
+
+# e2e working directory created by Task e2e:tun
+/.e2e/

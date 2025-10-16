@@ -6,34 +6,33 @@ import (
 	"io"
 	"net"
 	"sync"
-	"time"
 )
 
 var ErrFrameTooLarge = errors.New("framedConn: frame too large")
 
 type framedConn struct {
-	bc           net.Conn
+	net.Conn
 	maxFrameSize int
 	pending      []byte
 	rmu, wmu     sync.Mutex
 }
 
-type framedConnOption func(*framedConn)
+type FramedConnOption func(*framedConn)
 
-func WithMaxFrameSize(size int) framedConnOption {
+func WithMaxFrameSize(size uint32) FramedConnOption {
 	return func(c *framedConn) {
-		c.maxFrameSize = size
+		c.maxFrameSize = int(size)
 	}
 }
 
 // NewFramedConn wraps a net.Conn with a simple length-prefixed framing protocol.
 // Each frame is prefixed with a 4-byte big-endian unsigned integer indicating the length of the frame.
 // If the frame size exceeds maxFrameSize, Read will return ErrFrameTooLarge.
-// The default maxFrameSize is 16KB.
-func NewFramedConn(c net.Conn, opts ...framedConnOption) net.Conn {
+// The default maxFrameSize is 32KB.
+func NewFramedConn(c net.Conn, opts ...FramedConnOption) net.Conn {
 	fc := &framedConn{
-		bc:           c,
-		maxFrameSize: 1 << 14, // 16KB default max frame size
+		Conn:         c,
+		maxFrameSize: 32 * 1024, // 32KB default max frame size
 	}
 	for _, opt := range opts {
 		opt(fc)
@@ -53,7 +52,7 @@ func (c *framedConn) Read(p []byte) (int, error) {
 	}
 
 	var hdr [4]byte
-	if _, err := io.ReadFull(c.bc, hdr[:]); err != nil {
+	if _, err := io.ReadFull(c.Conn, hdr[:]); err != nil {
 		return 0, err
 	}
 	n := int(binary.BigEndian.Uint32(hdr[:]))
@@ -66,12 +65,12 @@ func (c *framedConn) Read(p []byte) (int, error) {
 	}
 
 	if len(p) >= n {
-		_, err := io.ReadFull(c.bc, p[:n])
+		_, err := io.ReadFull(c.Conn, p[:n])
 		return n, err
 	}
 
 	buf := make([]byte, n)
-	if _, err := io.ReadFull(c.bc, buf); err != nil {
+	if _, err := io.ReadFull(c.Conn, buf); err != nil {
 		return 0, err
 	}
 	w := copy(p, buf)
@@ -86,27 +85,20 @@ func (c *framedConn) Write(p []byte) (int, error) {
 
 	var hdr [4]byte
 	binary.BigEndian.PutUint32(hdr[:], uint32(len(p)))
-	if _, err := c.bc.Write(hdr[:]); err != nil {
+	if _, err := c.Conn.Write(hdr[:]); err != nil {
 		return 0, err
 	}
 	if len(p) == 0 {
 		return 0, nil
 	}
-	if _, err := c.bc.Write(p); err != nil {
+	if _, err := c.Conn.Write(p); err != nil {
 		return 0, err
 	}
 	// If the underlying layer is buffered and implements Flush, flush now to coalesce header+payload.
-	if fw, ok := c.bc.(BufConn); ok {
+	if fw, ok := c.Conn.(BufConn); ok {
 		if err := fw.Flush(); err != nil {
 			return 0, err
 		}
 	}
 	return len(p), nil
 }
-
-func (c *framedConn) Close() error                       { return c.bc.Close() }
-func (c *framedConn) LocalAddr() net.Addr                { return c.bc.LocalAddr() }
-func (c *framedConn) RemoteAddr() net.Addr               { return c.bc.RemoteAddr() }
-func (c *framedConn) SetDeadline(t time.Time) error      { return c.bc.SetDeadline(t) }
-func (c *framedConn) SetReadDeadline(t time.Time) error  { return c.bc.SetReadDeadline(t) }
-func (c *framedConn) SetWriteDeadline(t time.Time) error { return c.bc.SetWriteDeadline(t) }

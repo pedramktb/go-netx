@@ -44,7 +44,7 @@ Notes:
 rawClient, rawServer := net.Pipe()
 defer rawClient.Close(); defer rawServer.Close()
 
-client := netx.NewFramedConn(rawClient)                 // default max frame size 16KiB
+client := netx.NewFramedConn(rawClient)                 // default max frame size 32KiB
 server := netx.NewFramedConn(rawServer, netx.WithMaxFrameSize(64<<10))
 
 msg := []byte("hello frame")
@@ -153,10 +153,84 @@ If `Logger` is nil, the server/tunnel use `slog.Default()`.
 - Unhandled connections are dropped immediately after all routes decline.
 - `Shutdown(ctx)` will close listeners, then wait for tracked connections until `ctx` is done, after which remaining connections are force‑closed.
 
-## Testing
+## CLI
 
-The repository includes unit and end‑to‑end tests (UDP over TCP, TLS routing, graceful shutdown). Run:
+An extendable CLI is available at `cmd/netx` with an initial `tun` subcommand to relay between chainable endpoints.
+
+Build:
 
 ```bash
-go test ./...
+task build
 ```
+
+Install and use:
+
+```bash
+go install github.com/pedramktb/go-netx/cmd/netx@latest
+
+# Show help
+netx tun -h
+
+# Example: TCP TLS server to TCP TLS+buffered+framed+aesgcm client
+netx tun \
+  --from tcp+tls[cert=server.crt,key=server.key]://:9000 \
+  --to tcp+tls[cert=client.crt]+buffered[size=8192]+framed[maxsize=4096]+aesgcm[key=00112233445566778899aabbccddeeff]://example.com:9443
+
+# Example: UDP DTLS server to UDP aesgcm client
+netx tun \
+  --from udp+dtls[cert=server.crt,key=server.key]://:4444 \
+  --to udp+aesgcm[key=00112233445566778899aabbccddeeff]://10.0.0.10:5555
+```
+
+Options:
+
+- `--from <chain>://listenAddr` - Incoming side chain URI (required)
+- `--to <chain>://connectAddr` - Peer side chain URI (required)
+- `--log <level>` - Log level: debug|info|warn|error (default: info)
+- `-h` - Show help
+
+Chain syntax:
+
+Chains use the form `<chain>://host:port` where `<chain>` is a `+`-separated list starting with a base transport (`tcp` or `udp`), optionally followed by wrappers with parameters in brackets.
+
+**Supported base transports:**
+
+- `tcp` - TCP listener or dialer
+- `udp` - UDP listener or dialer
+
+**Supported wrappers:**
+
+- `tls` - Transport Layer Security
+  - Server params: `cert`, `key`
+  - Client params: `cert` (optional, for SPKI pinning), `servername` (required if cert not provided)
+
+- `utls` - TLS with client fingerprint camouflage via uTLS
+  - Client-side only
+  - Params: `cert` (optional, for SPKI pinning), `servername` (required if cert not provided), `hello` (optional: chrome, firefox, ios, android, safari, edge, randomized, randomizednoalpn; default: chrome)
+
+- `dtls` - Datagram Transport Layer Security
+  - Server params: `cert`, `key`
+  - Client params: `cert` (optional, for SPKI pinning), `servername` (required if cert not provided)
+
+- `tlspsk` - TLS with pre-shared key (TLS 1.2, cipher: TLS_PSK_WITH_AES_256_CBC_SHA)
+  - Params: `key`, `identity`
+
+- `dtlspsk` - DTLS with pre-shared key (cipher: TLS_PSK_WITH_AES_128_GCM_SHA256)
+  - Params: `key`, `identity`
+
+- `aesgcm` - AES-GCM encryption with passive IV exchange
+  - Params: `key`, `maxpacket` (optional, default: 32768)
+
+- `buffered` - Buffered read/write for better performance
+  - Params: `size` (optional, default: 4096)
+
+- `framed` - Length-prefixed frames for packet semantics over streams
+  - Params: `maxsize` (optional, default: 32768)
+
+- `ssh` - SSH tunneling via "direct-tcpip" channels
+  - Server params: `key` (optional, required with pass), `pass` (optional), `pubkey` (optional, required if no pass)
+  - Client params: `pubkey`, `pass` (optional), `key` (optional, required if no pass)
+
+**Notes:**
+- All passwords, keys and certificates must be provided as hex-encoded strings.
+- When using `cert` for client-side `tls`/`utls`/`dtls`, default validation is disabled and a manual SPKI (SubjectPublicKeyInfo) hash comparison is performed against the provided certificate. This is certificate pinning and will fail if the server presents a different key.
