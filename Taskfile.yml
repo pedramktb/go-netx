@@ -34,7 +34,7 @@ tasks:
       - env GOOS=windows GOARCH=arm64 go build -o build/netx_windows_arm64.exe cmd/netx/*.go
       # - env GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc go build -buildmode=c-shared -o build/libnetx_windows_x64.dll cmd/netx/lib/main.go
       # # aarch64-w64-mingw32-gcc is experimental and not available
-      # # - env GOOS=windows GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-w64-mingw32-gcc go build -buildmode=c-shared -o build/libenetx_windows_arm64.dll cmd/lib/main.go
+      # # - env GOOS=windows GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-w64-mingw32-gcc go build -buildmode=c-shared -o build/libnetx_windows_arm64.dll cmd/lib/main.go
       # # macOS binaries
       - env GOOS=darwin GOARCH=amd64 go build -o build/netx_macos_x64 cmd/netx/*.go
       - env GOOS=darwin GOARCH=arm64 go build -o build/netx_macos_arm64 cmd/netx/*.go

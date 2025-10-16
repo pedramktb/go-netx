@@ -202,38 +202,35 @@ Chains use the form `<chain>://host:port` where `<chain>` is a `+`-separated lis
 
 - `tls` - Transport Layer Security
   - Server params: `cert`, `key`
-  - Client params: `cert` (optional, for SPKI pinning), `serverName` (required if cert not provided)
+  - Client params: `cert` (optional, for SPKI pinning), `servername` (required if cert not provided)
 
 - `utls` - TLS with client fingerprint camouflage via uTLS
   - Client-side only
-  - Params: `cert` (optional, for SPKI pinning), `serverName` (required if cert not provided), `hello` (optional: chrome, firefox, ios, android, safari, edge, randomized, randomizednoalpn; default: chrome)
+  - Params: `cert` (optional, for SPKI pinning), `servername` (required if cert not provided), `hello` (optional: chrome, firefox, ios, android, safari, edge, randomized, randomizednoalpn; default: chrome)
 
 - `dtls` - Datagram Transport Layer Security
   - Server params: `cert`, `key`
-  - Client params: `cert` (optional, for SPKI pinning), `serverName` (required if cert not provided)
+  - Client params: `cert` (optional, for SPKI pinning), `servername` (required if cert not provided)
 
 - `tlspsk` - TLS with pre-shared key (TLS 1.2, cipher: TLS_PSK_WITH_AES_256_CBC_SHA)
-  - ⚠️ WARNING: Uses deprecated library, use at your own risk!
-  - Params: `key` (hex-encoded), `identity`
+  - Params: `key`, `identity`
 
 - `dtlspsk` - DTLS with pre-shared key (cipher: TLS_PSK_WITH_AES_128_GCM_SHA256)
-  - Params: `key` (hex-encoded), `identity`
+  - Params: `key`, `identity`
 
 - `aesgcm` - AES-GCM encryption with passive IV exchange
-  - Params: `key` (hex-encoded), `maxPacket` (optional, default: 32768)
+  - Params: `key`, `maxpacket` (optional, default: 32768)
 
 - `buffered` - Buffered read/write for better performance
-  - Params: `buf` (optional, default: 4096)
+  - Params: `size` (optional, default: 4096)
 
 - `framed` - Length-prefixed frames for packet semantics over streams
   - Params: `maxFrame` (optional, default: 32768)
 
 - `ssh` - SSH tunneling via "direct-tcpip" channels
-  - Server params: `hostKey`, `user` (optional, required with pass), `pass` (optional), `authKey` (optional, required if no pass)
-  - Client params: `hostKey` (or `insecure=true`), `user`, `pass` (optional), `key` (optional, required if no pass)
+  - Server params: `key` (optional, required with pass), `pass` (optional), `pubkey` (optional, required if no pass)
+  - Client params: `pubkey`, `pass` (optional), `key` (optional, required if no pass)
 
 **Notes:**
-
-- If `cert` is provided on the client for `tls`/`dtls`/`utls`, default validation is disabled and SPKI (SubjectPublicKeyInfo) pinning is performed instead
-- Multiple wrappers can be chained on either side
-- The tool uses `TunMaster` under the hood for efficient bidirectional relay
+- All passwords, keys and certificates must be provided as hex-encoded strings.
+- When using `cert` for client-side `tls`/`utls`/`dtls`, default validation is disabled and a manual SPKI (SubjectPublicKeyInfo) hash comparison is performed against the provided certificate. This is certificate pinning and will fail if the server presents a different key.

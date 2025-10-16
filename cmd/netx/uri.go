@@ -1,7 +1,7 @@
 package main
 
 const uriFormat = `URI Format:
-	<transport>+<layer1>[layer1param1key=layer1param1value,layer1param2key=layer1param2key,...]+<layer2>+...://<address>
+	<transport>+<layer1>[layer1param1key=layer1param1value,layer1param2key=layer1param2value,...]+<layer2>+...://<address>
 
 	Examples:
 		tcp+tls[cert=$(cat server.crt | xxd -p),key=$(cat server.key | xxd -p)]://:9000
@@ -36,7 +36,7 @@ const uriFormat = `URI Format:
 
 	Notes:
 		- All passwords, keys and certificates must be provided as hex-encoded strings.
-		- When using 'cert' for client-side TLS/DTLS, default validation is disabled and a manual SPKI (SubjectPublicKeyInfo) hash comparison is performed
+		- When using 'cert' for client-side TLS/uTLS/DTLS, default validation is disabled and a manual SPKI (SubjectPublicKeyInfo) hash comparison is performed
 		against the provided certificate. This is certificate pinning and will fail if the server presents a different key.
 		- SSH server must accept "direct-tcpip" channels (most do by default).
 `
