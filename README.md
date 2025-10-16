@@ -174,7 +174,7 @@ netx tun -h
 # Example: TCP TLS server to TCP TLS+buffered+framed+aesgcm client
 netx tun \
   --from tcp+tls[cert=server.crt,key=server.key]://:9000 \
-  --to tcp+tls[cert=client.crt]+buffered[buf=8192]+framed[maxFrame=4096]+aesgcm[key=00112233445566778899aabbccddeeff]://example.com:9443
+  --to tcp+tls[cert=client.crt]+buffered[size=8192]+framed[maxsize=4096]+aesgcm[key=00112233445566778899aabbccddeeff]://example.com:9443
 
 # Example: UDP DTLS server to UDP aesgcm client
 netx tun \
@@ -225,7 +225,7 @@ Chains use the form `<chain>://host:port` where `<chain>` is a `+`-separated lis
   - Params: `size` (optional, default: 4096)
 
 - `framed` - Length-prefixed frames for packet semantics over streams
-  - Params: `maxFrame` (optional, default: 32768)
+  - Params: `maxsize` (optional, default: 32768)
 
 - `ssh` - SSH tunneling via "direct-tcpip" channels
   - Server params: `key` (optional, required with pass), `pass` (optional), `pubkey` (optional, required if no pass)
