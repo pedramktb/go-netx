@@ -74,7 +74,7 @@ func NewAESGCMConn(c net.Conn, key []byte, opts ...AESGCMOption) (net.Conn, erro
 	// Passive handshake (duplex): concurrently read peer IV while writing ours
 	handshakeDeadline := time.Now().Add(5 * time.Second)
 	_ = c.SetDeadline(handshakeDeadline)
-	defer c.SetDeadline(time.Time{}) // clear deadline after handshake
+	defer func() { _ = c.SetDeadline(time.Time{}) }() // clear deadline after handshake
 
 	// Start read of peer's 12-byte IV
 	readErrCh := make(chan error, 1)
