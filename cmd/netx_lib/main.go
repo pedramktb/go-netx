@@ -1,12 +1,8 @@
 package main
 
 /*
-#include <stdint.h>
 #include <stdlib.h>
-#include <stddef.h>
-
 typedef void (*netx_callback_t)(const char* msg);
-
 static inline void netx_call_callback(netx_callback_t cb, const char* msg) {
     if (cb != NULL) {
         cb(msg);
