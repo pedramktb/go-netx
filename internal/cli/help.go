@@ -1,4 +1,4 @@
-package main
+package cli
 
 const uriFormat = `URI Format:
 	<transport>+<layer1>[layer1param1key=layer1param1value,layer1param2key=layer1param2value,...]+<layer2>+...://<address>
