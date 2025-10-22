@@ -4,7 +4,7 @@ package main
 #include <stdlib.h>
 typedef void (*netx_callback_t)(const char* msg);
 extern int Netx(char* id, int argc, char** argv, netx_callback_t outCB, netx_callback_t errCB);
-extern int NetxInterrupt(char* handle);
+extern int NetxInterrupt(char* id);
 */
 import "C"
 

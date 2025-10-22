@@ -123,11 +123,11 @@ func Netx(id *C.char, argc C.int, argv **C.char, outCB, errCB C.netx_callback_t)
 }
 
 //export NetxInterrupt
-func NetxInterrupt(handle *C.char) C.int {
-	if handle == nil {
+func NetxInterrupt(id *C.char) C.int {
+	if id == nil {
 		return 0
 	}
-	if interruptActiveCall(C.GoString(handle)) {
+	if interruptActiveCall(C.GoString(id)) {
 		return 1
 	}
 	return 0

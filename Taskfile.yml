@@ -72,14 +72,12 @@ tasks:
       # iOS static libraries
       - |
         export CC=$(xcrun -find -sdk iphonesimulator clang)
-        export CXX=$(xcrun -find -sdk iphonesimulator clang++)
         export SDKROOT=$(xcrun --sdk iphonesimulator --show-sdk-path)
         export CFLAGS="-arch x86_64 -isysroot $SDKROOT -mios-simulator-version-min=10.0"
         export LDFLAGS="-arch x86_64 -isysroot $SDKROOT -mios-simulator-version-min=10.0"
         env GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -buildmode=c-archive -o build/libnetx_ios_x64.a cmd/netx_lib/*.go
       - |
         export CC=$(xcrun -find -sdk iphoneos clang)
-        export CXX=$(xcrun -find -sdk iphoneos clang++)
         export SDKROOT=$(xcrun --sdk iphoneos --show-sdk-path)
         export CFLAGS="-arch arm64 -isysroot $SDKROOT -mios-version-min=10.0"
         export LDFLAGS="-arch arm64 -isysroot $SDKROOT -mios-version-min=10.0"
