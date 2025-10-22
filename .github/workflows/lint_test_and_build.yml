@@ -15,7 +15,6 @@ on:
 
 jobs:
   lint-test-and-build:
-    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     steps:
       - run: sudo apt update && sudo apt install -y gcc-x86-64-linux-gnu gcc-aarch64-linux-gnu gcc-mingw-w64-x86-64
@@ -41,7 +40,6 @@ jobs:
           retention-days: 7
 
   build-lib-darwin:
-    if: github.event_name != 'release'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,7 +55,7 @@ jobs:
       - run: task build:lib:darwin
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.sha }}
+          name: darwin-${{ github.sha }}
           path: build/
           if-no-files-found: error
           retention-days: 7
@@ -72,6 +70,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: ${{ github.sha }}
+          path: build
+      - uses: actions/download-artifact@v4
+        with:
+          name: darwin-${{ github.sha }}
           path: build
       - uses: softprops/action-gh-release@v2
         with:

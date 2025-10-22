@@ -24,23 +24,26 @@ tasks:
   build:
     desc: Build binaries and libraries
     cmds:
-      # Linux binaries and shared libraries
+      - mkdir -p build
+      # Linux binaries
       - env GOOS=linux GOARCH=amd64 go build -o build/netx_linux_x64 cmd/netx/*.go
       - env GOOS=linux GOARCH=arm64 go build -o build/netx_linux_arm64 cmd/netx/*.go
+      # Linux shared libraries
       - env GOOS=linux GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-linux-gnu-gcc go build -buildmode=c-shared -o build/libnetx_linux_x64.so cmd/netx_lib/*.go
       - env GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-gnu-gcc go build -buildmode=c-shared -o build/libnetx_linux_arm64.so cmd/netx_lib/*.go
-      # # Windows binaries and shared libraries
+      # Windows binaries
       - env GOOS=windows GOARCH=amd64 go build -o build/netx_windows_x64.exe cmd/netx/*.go
       - env GOOS=windows GOARCH=arm64 go build -o build/netx_windows_arm64.exe cmd/netx/*.go
-      # - env GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc go build -buildmode=c-shared -o build/libnetx_windows_x64.dll cmd/netx/lib/main.go
-      # # aarch64-w64-mingw32-gcc is experimental and not available
-      # # - env GOOS=windows GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-w64-mingw32-gcc go build -buildmode=c-shared -o build/libnetx_windows_arm64.dll cmd/lib/main.go
-      # # macOS binaries
+      # Windows shared libraries
+      - env GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc go build -buildmode=c-shared -o build/libnetx_windows_x64.dll cmd/netx_lib/*.go
+      # aarch64-w64-mingw32-gcc is experimental and not available in CI or production builds
+      # - env GOOS=windows GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-w64-mingw32-gcc go build -buildmode=c-shared -o build/libnetx_windows_arm64.dll cmd/netx_lib/*.go
+      # macOS binaries
       - env GOOS=darwin GOARCH=amd64 go build -o build/netx_macos_x64 cmd/netx/*.go
       - env GOOS=darwin GOARCH=arm64 go build -o build/netx_macos_arm64 cmd/netx/*.go
-      # # Android shared libraries
-      # - env GOOS=android GOARCH=amd64 CGO_ENABLED=1 CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android26-clang go build -buildmode=c-shared -o build/libnetx_android_x64.so cmd/netx/lib/main.go
-      # - env GOOS=android GOARCH=arm64 CGO_ENABLED=1 CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang go build -buildmode=c-shared -o build/libnetx_android_arm64.so cmd/netx/lib/main.go
+      # Android shared libraries
+      - env GOOS=android GOARCH=amd64 CGO_ENABLED=1 CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android26-clang go build -buildmode=c-shared -o build/libnetx_android_x64.so cmd/netx_lib/*.go
+      - env GOOS=android GOARCH=arm64 CGO_ENABLED=1 CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang go build -buildmode=c-shared -o build/libnetx_android_arm64.so cmd/netx_lib/*.go
     sources:
       - '**/*.go'
       - go.mod
@@ -53,39 +56,37 @@ tasks:
       - build/netx_windows_x64.exe
       - build/netx_windows_arm64.exe
       - build/libnetx_windows_x64.dll
+      - build/libnetx_windows_arm64.dll
       - build/netx_macos_x64
       - build/netx_macos_arm64
       - build/libnetx_android_x64.so
       - build/libnetx_android_arm64.so
-
+  
   build:lib:darwin:
     desc: Build Apple libraries (optional, requires mac toolchains)
     cmds:
-      - env GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -buildmode=c-shared -o build/libnetx_macos_x64.dylib cmd/netx/lib/main.go
-      - env GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -buildmode=c-shared -o build/libnetx_macos_arm64.dylib cmd/netx/lib/main.go
+      - mkdir -p build
+      # macOS static libraries
+      - env GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -buildmode=c-archive -o build/libnetx_macos_x64.a cmd/netx_lib/*.go
+      - env GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -buildmode=c-archive -o build/libnetx_macos_arm64.a cmd/netx_lib/*.go
+      # iOS static libraries
       - |
-        mkdir -p build
-        export CC=$(xcrun -find -sdk iphonesimulator clang)
-        export CXX=$(xcrun -find -sdk iphonesimulator clang++)
-        export SDKROOT=$(xcrun --sdk iphonesimulator --show-sdk-path)
-        export CFLAGS="-arch x86_64 -isysroot $SDKROOT -mios-simulator-version-min=10.0"
-        export LDFLAGS="-arch x86_64 -isysroot $SDKROOT -mios-simulator-version-min=10.0"
-        env GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -buildmode=c-archive -o build/libnetx_ios_x64.a cmd/netx/lib/main.go
+        env GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 CC=$(xcrun -find -sdk iphonesimulator clang) \
+        CFLAGS="-arch x86_64 -isysroot $(xcrun --sdk iphonesimulator --show-sdk-path) -mios-simulator-version-min=10.0" \
+        LDFLAGS="-arch x86_64 -isysroot $(xcrun --sdk iphonesimulator --show-sdk-path) -mios-simulator-version-min=10.0" \
+        go build -buildmode=c-archive -o build/libnetx_ios_x64.a cmd/netx_lib/*.go
       - |
-        mkdir -p build
-        export CC=$(xcrun -find -sdk iphoneos clang)
-        export CXX=$(xcrun -find -sdk iphoneos clang++)
-        export SDKROOT=$(xcrun --sdk iphoneos --show-sdk-path)
-        export CFLAGS="-arch arm64 -isysroot $SDKROOT -mios-version-min=10.0"
-        export LDFLAGS="-arch arm64 -isysroot $SDKROOT -mios-version-min=10.0"
-        env GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -buildmode=c-archive -o build/libnetx_ios_arm64.a cmd/netx/lib/main.go
+        env GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 CC=$(xcrun -find -sdk iphoneos clang) \
+        CFLAGS="-arch arm64 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) -mios-version-min=10.0" \
+        LDFLAGS="-arch arm64 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) -mios-version-min=10.0" \
+        go build -buildmode=c-archive -o build/libnetx_ios_arm64.a cmd/netx_lib/*.go
     sources:
       - '**/*.go'
       - go.mod
       - go.sum
     generates:
-      - build/libnetx_macos_x64.dylib
-      - build/libnetx_macos_arm64.dylib
+      - build/libnetx_macos_x64.a
+      - build/libnetx_macos_arm64.a
       - build/libnetx_ios_x64.a
       - build/libnetx_ios_arm64.a
 
