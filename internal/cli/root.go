@@ -85,7 +85,7 @@ func Run(ctx context.Context, cancel context.CancelFunc, opts ...Option) (exitCo
 	cmd.AddCommand(tun(cancel))
 
 	if err := cmd.ExecuteContext(ctx); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(cfg.err, err)
 		return 1
 	}
 

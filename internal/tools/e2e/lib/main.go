@@ -19,16 +19,16 @@ import (
 const handle = "e2e"
 
 func main() {
-	ctx, _ := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-ctx.Done()
 		interrupt()
 	}()
-	os.Exit(run())
-
+	os.Exit(run(cancel))
 }
 
-func run() int {
+func run(cancel context.CancelFunc) int {
+	defer cancel()
 	cHandle := C.CString(handle)
 	defer C.free(unsafe.Pointer(cHandle))
 	args := os.Args[1:]
