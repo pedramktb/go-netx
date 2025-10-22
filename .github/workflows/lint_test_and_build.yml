@@ -18,12 +18,14 @@ jobs:
     if: github.event_name != 'release'
     runs-on: ubuntu-latest
     steps:
+      - run: sudo apt update && sudo apt install -y gcc-x86-64-linux-gnu gcc-aarch64-linux-gnu gcc-mingw-w64-x86-64
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
       - uses: arduino/setup-task@v2
         with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
           version: 3.x
       - run: task deps
       - run: task lint
