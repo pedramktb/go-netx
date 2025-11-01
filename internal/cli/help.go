@@ -10,6 +10,7 @@ const uriFormat = `URI Format:
 	Supported transports:
 		- tcp: TCP listener or dialer
 		- udp: UDP listener or dialer
+		- icmp: ICMP listener or dialer
 
 	Supported layers:
 		- framed: length-prefixed frames for transports or layers that need packet semantics over streams.
