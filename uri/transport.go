@@ -8,8 +8,9 @@ import (
 type Transport string
 
 const (
-	TransportTCP Transport = "tcp"
-	TransportUDP Transport = "udp"
+	TransportTCP  Transport = "tcp"
+	TransportUDP  Transport = "udp"
+	TransportICMP Transport = "icmp"
 )
 
 func (t Transport) String() string {
@@ -21,12 +22,11 @@ func (t Transport) MarshalText() ([]byte, error) {
 }
 
 func (t *Transport) UnmarshalText(text []byte) error {
-	str := strings.ToLower(strings.TrimSpace(string(text)))
-	switch Transport(str) {
-	case TransportTCP, TransportUDP:
-		*t = Transport(str)
+	*t = Transport(strings.ToLower(strings.TrimSpace(string(text))))
+	switch *t {
+	case TransportTCP, TransportUDP, TransportICMP:
 		return nil
 	default:
-		return fmt.Errorf("uri: unknown transport %q", str)
+		return fmt.Errorf("uri: unknown transport %q", string(text))
 	}
 }

@@ -1,4 +1,4 @@
-package main
+package cli
 
 const uriFormat = `URI Format:
 	<transport>+<layer1>[layer1param1key=layer1param1value,layer1param2key=layer1param2value,...]+<layer2>+...://<address>
@@ -10,6 +10,7 @@ const uriFormat = `URI Format:
 	Supported transports:
 		- tcp: TCP listener or dialer
 		- udp: UDP listener or dialer
+		- icmp: ICMP listener or dialer
 
 	Supported layers:
 		- framed: length-prefixed frames for transports or layers that need packet semantics over streams.

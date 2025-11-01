@@ -28,16 +28,16 @@ func (t *Tun) Relay(ctx context.Context) {
 	sendErrCh := make(chan error, 1)
 	recvErrCh := make(chan error, 1)
 
-	go t.halfCopy(t.Conn, t.Peer, sendErrCh)
-	go t.halfCopy(t.Peer, t.Conn, recvErrCh)
+	go t.halfCopy(t.Peer, t.Conn, sendErrCh)
+	go t.halfCopy(t.Conn, t.Peer, recvErrCh)
 
 	sendErr := <-sendErrCh
 	recvErr := <-recvErrCh
 	if sendErr != nil {
-		t.Logger.ErrorContext(ctx, "error copying data from tun to peer", "error", sendErr.Error())
+		t.Logger.ErrorContext(ctx, "error copying data from peer to tun", "error", sendErr.Error())
 	}
 	if recvErr != nil {
-		t.Logger.ErrorContext(ctx, "error copying data from peer to tun", "error", recvErr.Error())
+		t.Logger.ErrorContext(ctx, "error copying data from tun to peer", "error", recvErr.Error())
 	}
 }
 

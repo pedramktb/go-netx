@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"context"
@@ -76,7 +76,7 @@ func runTun(ctx context.Context, cancel context.CancelFunc, from, to string) err
 	tm.SetRoute(struct{}{}, func(ctx context.Context, conn net.Conn) (bool, context.Context, netx.Tun) {
 		pconn, err := toURI.Dial(ctx)
 		if err != nil {
-			slog.Error("dial peer", "err", err)
+			slog.Error("dial tun", "err", err)
 			_ = conn.Close()
 			return false, ctx, netx.Tun{}
 		}
