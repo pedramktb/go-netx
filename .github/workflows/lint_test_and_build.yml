@@ -67,11 +67,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           name: ${{ github.sha }}
           path: build
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           name: darwin-${{ github.sha }}
           path: build
