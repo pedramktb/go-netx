@@ -4,7 +4,7 @@ go 1.25.1
 
 require (
 	github.com/pion/dtls/v3 v3.0.7
-	github.com/pion/transport/v3 v3.0.8
+	github.com/pion/transport/v3 v3.1.1
 	github.com/raff/tls-ext v1.0.0
 	github.com/raff/tls-psk v1.0.0
 	github.com/refraction-networking/utls v1.8.1
