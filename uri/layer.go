@@ -111,7 +111,7 @@ func (l *Layer) UnmarshalText(text []byte) error {
 			return fmt.Errorf("uri: missing ']' in layer %q", str)
 		}
 		l.Prot = strings.ToLower(strings.TrimSpace(str[:idx]))
-		for pair := range strings.SplitSeq(str[idx+1:len(str)-1], ",") {
+		for _, pair := range strings.Split(str[idx+1:len(str)-1], ",") {
 			kv := strings.SplitN(pair, "=", 2)
 			if len(kv) != 2 {
 				return fmt.Errorf("uri: invalid parameter %q", pair)
@@ -573,9 +573,6 @@ NXPuT9B/6+hM7nD/vh7JKXTfSAEFo22rzwA=
 MC4CAQAwBQYDK2VwBCIEIEsb9X3HHGBFSe5jKvqNmua6ZFplNaiBROtJ7ZZAJlRz
 -----END PRIVATE KEY-----
 `
-	cert, err := tlswithpks.X509KeyPair([]byte(certPEM), []byte(keyPEM))
-	if err != nil {
-		panic("dummyCert: " + err.Error())
-	}
+	cert, _ := tlswithpks.X509KeyPair([]byte(certPEM), []byte(keyPEM))
 	return []tlswithpks.Certificate{cert}
 }
