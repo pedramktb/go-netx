@@ -9,7 +9,7 @@ require (
 	github.com/raff/tls-psk v1.0.0
 	github.com/refraction-networking/utls v1.8.1
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/crypto v0.46.0
+	golang.org/x/crypto v0.47.0
 	golang.org/x/net v0.48.0
 )
 
@@ -19,5 +19,5 @@ require (
 	github.com/klauspost/compress v1.18.1 // indirect
 	github.com/pion/logging v0.2.4 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
-	golang.org/x/sys v0.39.0 // indirect
+	golang.org/x/sys v0.40.0 // indirect
 )
