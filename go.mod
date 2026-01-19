@@ -7,7 +7,7 @@ require (
 	github.com/pion/transport/v3 v3.1.1
 	github.com/raff/tls-ext v1.0.0
 	github.com/raff/tls-psk v1.0.0
-	github.com/refraction-networking/utls v1.8.1
+	github.com/refraction-networking/utls v1.8.2
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.46.0
 	golang.org/x/net v0.48.0
