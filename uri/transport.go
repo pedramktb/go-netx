@@ -8,9 +8,9 @@ import (
 type Transport string
 
 const (
-	TransportTCP  Transport = "tcp"
-	TransportUDP  Transport = "udp"
-	TransportICMP Transport = "icmp"
+	TransportTCP  Transport = "tcp"  // ip:6
+	TransportUDP  Transport = "udp"  // ip:17
+	TransportICMP Transport = "icmp" // ip:1
 )
 
 func (t Transport) String() string {

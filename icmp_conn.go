@@ -1,3 +1,10 @@
+/*
+ICMPConn is a network layer that tunnels traffic over ICMP Echo Request/Reply packets.
+It can operate in client mode (sending Echo Requests) or server mode (replying with Echo Replies).
+This allows bypassing firewalls that allow ICMP traffic but block other protocols.
+It handles packet identification and sequencing to map ICMP packets to the stream.
+*/
+
 package netx
 
 import (

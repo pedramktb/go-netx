@@ -160,6 +160,25 @@ func (l *Layer) UnmarshalText(text []byte) error {
 		l.wrap = func(c net.Conn) (net.Conn, error) {
 			return netx.NewBufConn(c, opts...), nil
 		}
+	case "dns":
+		var domain string
+		for key, value := range l.Params {
+			switch key {
+			case "domain":
+				domain = value
+			default:
+				return fmt.Errorf("uri: unknown dns parameter %q", key)
+			}
+		}
+		if domain == "" {
+			return fmt.Errorf("uri: missing dns domain parameter")
+		}
+		l.wrap = func(c net.Conn) (net.Conn, error) {
+			if l.Listener {
+				return netx.NewDNSTServerConn(c, domain), nil
+			}
+			return netx.NewDNSTClientConn(c, domain), nil
+		}
 	case "aesgcm":
 		aeskey := []byte{}
 		opts := []netx.AESGCMOption{}

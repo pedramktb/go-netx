@@ -1,3 +1,12 @@
+/*
+BufferedConn is a network layer that buffers reads and writes, significantly reducing
+the number of syscalls for small IO operations. It wraps a net.Conn with a bufio.Reader
+and bufio.Writer.
+
+This is particularly useful when used with FramedConn, which performs multiple writes
+(header + payload) per frame.
+*/
+
 package netx
 
 import (

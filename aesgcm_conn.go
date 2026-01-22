@@ -1,3 +1,14 @@
+/*
+AESGCMConn is a network layer that provides authenticated encryption using AES-GCM.
+It is designed to work over packet-oriented connections. Each packet includes a
+sequence number and the encrypted payload. The sequence number is used for nonce
+derivation and to prevent replay attacks.
+
+Note: Upon creation (NewAESGCMConn), a custom handshake occurs: both ends generate a random
+12-byte IV and exchange them. This IV is then used as the base for nonce
+generation (XORed with the packet sequence number).
+*/
+
 package netx
 
 import (

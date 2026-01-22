@@ -1,3 +1,9 @@
+/*
+SSHConn is a network layer that tunnels traffic over a secure SSH connection.
+It establishes an SSH handshake (client or server) over an underlying connection
+and opens a "direct-tcpip" channel to stream data.
+*/
+
 package netx
 
 import (

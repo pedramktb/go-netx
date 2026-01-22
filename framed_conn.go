@@ -1,3 +1,14 @@
+/*
+FramedConn is a network layer that adds a length-prefixed framing protocol inside a stream-oriented
+connection (like TCP). This allows wrapping packet-based connections inside stream ones (e.g.
+UDP over TCP+TLS), preserving message boundaries. Each frame consists of a 4-byte big-endian
+length header followed by the payload.
+
+Since FramedConn performs two writes per frame (one for the header and one for the payload),
+it is highly recommended to wrap the underlying connection in a BufferedConn. This coalesces
+the writes into a single system call, significantly improving performance.
+*/
+
 package netx
 
 import (

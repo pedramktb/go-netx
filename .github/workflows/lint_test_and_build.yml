@@ -30,7 +30,7 @@ jobs:
       - run: task lint
       - run: task test
       - run: task test:e2e:tun
-      - run: task test:e2e:lib:tun
+      - run: task test:e2e:tun lib=true
       - run: task build
       - uses: actions/upload-artifact@v5
         with:
