@@ -56,8 +56,8 @@ func tun(cancel context.CancelFunc) *cobra.Command {
 }
 
 func runTun(ctx context.Context, cancel context.CancelFunc, from, to string) error {
-	var fromURI, toURI uri.URI
-	fromURI.Listener = true
+	var fromURI uri.ServerURI
+	var toURI uri.ClientURI
 	if err := fromURI.UnmarshalText([]byte(from)); err != nil {
 		return fmt.Errorf("parse --from: %w", err)
 	}

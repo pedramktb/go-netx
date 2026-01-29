@@ -148,43 +148,50 @@ tasks:
         go build -tags e2e -o udp_echo "$ROOT/internal/tools/e2e/udp_echo"
         go build -tags e2e -o tcp_client "$ROOT/internal/tools/e2e/tcp_client"
         go build -tags e2e -o udp_client "$ROOT/internal/tools/e2e/udp_client"
+        go build -tags e2e -o dns_resolver "$ROOT/internal/tools/e2e/dns_resolver"
 
         # Use isolated ports to avoid conflicts with external demos
         TE=48080; UE=48081
-        STLS=49000; SDTLS=49100; SDTLSP=49300; SAESCT=49400; SAESCU=49500; SFR=49600; STLSPSK=49200; SSSH=49700; SUTLS=49800; SDNST=49950; SREALITY=49900
+        STLS=49000; SDTLS=49100; SDTLSP=49300; SAESCT=49400; SAESCU=49500; SFR=49600; STLSPSK=49200; SSSH=49700; SUTLS=49800; SREALITY=49900
+        # DNST Ports: SDNST_AUTH is the Authoritative Server (netx). SDNST_RES is the Mock Public Resolver.
+        SDNST_AUTH=49950; SDNST_RES=49951
         CTLS=50000; CDTLS=50010; CDTLSP=50011; CAESCT=50002; CAESCU=50012; CFR=50003; CTLSPSK=50001; CSSH=50004; CUTLS=50005; CDNST=50050; CREALITY=50006
 
         echo "Starting echo servers..."
         ./tcp_echo 127.0.0.1:${TE} > tcp_echo.log 2>&1 &
         ./udp_echo 127.0.0.1:${UE} > udp_echo.log 2>&1 &
 
+        echo "Starting mock DNS resolver..."
+        ./dns_resolver -listen "127.0.0.1:${SDNST_RES}" -upstream "127.0.0.1:${SDNST_AUTH}" -domain "t.com" > dns_resolver.log 2>&1 &
+
         echo "Starting server tunnels..."
-        "$NETX" tun --from "tcp+tls[cert=$(xxd -p server.crt | tr -d '\n'),key=$(xxd -p server.key | tr -d '\n')]://127.0.0.1:${STLS}"   --to "tcp://127.0.0.1:${TE}"  --log info > tls_server.log         2>&1 &
-        "$NETX" tun --from "udp+dtls[cert=$(xxd -p server.crt | tr -d '\n'),key=$(xxd -p server.key | tr -d '\n')]://127.0.0.1:${SDTLS}" --to "udp://127.0.0.1:${UE}"  --log info > dtls_server.log        2>&1 &
-        "$NETX" tun --from "udp+dtlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${SDTLSP}"                                --to "udp://127.0.0.1:${UE}"  --log info > dtlspsk_server.log     2>&1 &
-        "$NETX" tun --from "tcp+buffered[size=8192]+framed[maxsize=4096]+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCT}"   --to "tcp://127.0.0.1:${TE}"  --log info > aesgcm_tcp_server.log  2>&1 &
-        "$NETX" tun --from "udp+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCU}"                                            --to "udp://127.0.0.1:${UE}"  --log info > aesgcm_udp_server.log  2>&1 &
-        "$NETX" tun --from "tcp+framed[maxsize=4096]://127.0.0.1:${SFR}"                                                     --to "udp://127.0.0.1:${UE}"  --log info > framed_tcp_server.log  2>&1 &
-        "$NETX" tun --from "tcp+tlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${STLSPSK}"                                --to "tcp://127.0.0.1:${TE}"  --log info > tlspsk_server.log      2>&1 &
-        "$NETX" tun --from "tcp+ssh[key=$(xxd -p ssh_server_key | tr -d '\n'),pubkey=$(xxd -p ssh_client_key.pub | tr -d '\n')]://127.0.0.1:${SSSH}"                       --to "tcp://127.0.0.1:${TE}"  --log info > ssh_server.log         2>&1 &
-        "$NETX" tun --from "tcp+tls[cert=$(xxd -p server.crt | tr -d '\n'),key=$(xxd -p server.key | tr -d '\n')]://127.0.0.1:${SUTLS}"  --to "tcp://127.0.0.1:${TE}"  --log info > utls_server.log        2>&1 &
-        "$NETX" tun --from "udp+dnst[domain=t.com]://127.0.0.1:${SDNST}" --to "udp://127.0.0.1:${UE}" --log info > dnst_server.log 2>&1 &
+        "$NETX" tun --from "tcp+tls[cert=$(xxd -p server.crt | tr -d '\n'),key=$(xxd -p server.key | tr -d '\n')]://127.0.0.1:${STLS}"                --to "tcp://127.0.0.1:${TE}"  --log info > tls_server.log         2>&1 &
+        "$NETX" tun --from "udp+dtls[cert=$(xxd -p server.crt | tr -d '\n'),key=$(xxd -p server.key | tr -d '\n')]://127.0.0.1:${SDTLS}"              --to "udp://127.0.0.1:${UE}"  --log info > dtls_server.log        2>&1 &
+        "$NETX" tun --from "udp+dtlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${SDTLSP}"                                                         --to "udp://127.0.0.1:${UE}"  --log info > dtlspsk_server.log     2>&1 &
+        "$NETX" tun --from "tcp+buffered[size=8192]+framed[maxsize=4096]+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCT}"                            --to "tcp://127.0.0.1:${TE}"  --log info > aesgcm_tcp_server.log  2>&1 &
+        "$NETX" tun --from "udp+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCU}"                                                                     --to "udp://127.0.0.1:${UE}"  --log info > aesgcm_udp_server.log  2>&1 &
+        "$NETX" tun --from "tcp+framed[maxsize=4096]://127.0.0.1:${SFR}"                                                                              --to "udp://127.0.0.1:${UE}"  --log info > framed_tcp_server.log  2>&1 &
+        "$NETX" tun --from "tcp+tlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${STLSPSK}"                                                         --to "tcp://127.0.0.1:${TE}"  --log info > tlspsk_server.log      2>&1 &
+        "$NETX" tun --from "tcp+ssh[key=$(xxd -p ssh_server_key | tr -d '\n'),pubkey=$(xxd -p ssh_client_key.pub | tr -d '\n')]://127.0.0.1:${SSSH}"  --to "tcp://127.0.0.1:${TE}"  --log info > ssh_server.log         2>&1 &
+        "$NETX" tun --from "tcp+tls[cert=$(xxd -p server.crt | tr -d '\n'),key=$(xxd -p server.key | tr -d '\n')]://127.0.0.1:${SUTLS}"               --to "tcp://127.0.0.1:${TE}"  --log info > utls_server.log        2>&1 &
+        "$NETX" tun --from "[udp+dnst[domain=t.com]][id=00]://127.0.0.1:${SDNST_AUTH}"                                                                --to "udp://127.0.0.1:${UE}"  --log info > dnst_server.log        2>&1 &
         # "$NETX" tun --from "tcp+reality[privatekey=$(cat reality_priv),shortids=$(cat reality_shortid),dest=www.google.com:443,servernames=www.google.com]://127.0.0.1:${SREALITY}" --to "tcp://127.0.0.1:${TE}" --log info > reality_server.log 2>&1 &
 
         echo "Starting client tunnels..."
-        "$NETX" tun --from "tcp://127.0.0.1:${CTLS}"     --to "tcp+tls[cert=$(xxd -p server.crt | tr -d '\n')]://127.0.0.1:${STLS}"                                  --log info > tls_client.log         2>&1 &
-        "$NETX" tun --from "udp://127.0.0.1:${CDTLS}"    --to "udp+dtls[cert=$(xxd -p server.crt | tr -d '\n')]://127.0.0.1:${SDTLS}"                                --log info > dtls_client.log        2>&1 &
-        "$NETX" tun --from "udp://127.0.0.1:${CDTLSP}"   --to "udp+dtlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${SDTLSP}"                               --log info > dtlspsk_client.log     2>&1 &
-        "$NETX" tun --from "tcp://127.0.0.1:${CAESCT}"   --to "tcp+buffered[size=8192]+framed[maxsize=4096]+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCT}"  --log info > aesgcm_tcp_client.log  2>&1 &
-        "$NETX" tun --from "udp://127.0.0.1:${CAESCU}"   --to "udp+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCU}"                                           --log info > aesgcm_udp_client.log  2>&1 &
-        "$NETX" tun --from "udp://127.0.0.1:${CFR}"      --to "tcp+framed[maxsize=4096]://127.0.0.1:${SFR}"                                                    --log info > framed_tcp_client.log  2>&1 &
-        "$NETX" tun --from "tcp://127.0.0.1:${CTLSPSK}"  --to "tcp+tlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${STLSPSK}"                               --log info > tlspsk_client.log      2>&1 &
-        "$NETX" tun --from "tcp://127.0.0.1:${CSSH}"     --to "tcp+ssh[pubkey=$(xxd -p ssh_server_key.pub | tr -d '\n'),key=$(xxd -p ssh_client_key | tr -d '\n')]://127.0.0.1:${SSSH}"                      --log info > ssh_client.log         2>&1 &
-        "$NETX" tun --from "tcp://127.0.0.1:${CUTLS}"    --to "tcp+utls[cert=$(xxd -p server.crt | tr -d '\n'),hello=chrome]://127.0.0.1:${SUTLS}"                   --log info > utls_client.log        2>&1 &
-        "$NETX" tun --from "udp://127.0.0.1:${CDNST}" --to "udp+dnst[domain=t.com]://127.0.0.1:${SDNST}" --log info > dnst_client.log 2>&1 &
+        "$NETX" tun --from "tcp://127.0.0.1:${CTLS}"    --to "tcp+tls[cert=$(xxd -p server.crt | tr -d '\n')]://127.0.0.1:${STLS}"                                                      --log info > tls_client.log         2>&1 &
+        "$NETX" tun --from "udp://127.0.0.1:${CDTLS}"   --to "udp+dtls[cert=$(xxd -p server.crt | tr -d '\n')]://127.0.0.1:${SDTLS}"                                                    --log info > dtls_client.log        2>&1 &
+        "$NETX" tun --from "udp://127.0.0.1:${CDTLSP}"  --to "udp+dtlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${SDTLSP}"                                                         --log info > dtlspsk_client.log     2>&1 &
+        "$NETX" tun --from "tcp://127.0.0.1:${CAESCT}"  --to "tcp+buffered[size=8192]+framed[maxsize=4096]+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCT}"                            --log info > aesgcm_tcp_client.log  2>&1 &
+        "$NETX" tun --from "udp://127.0.0.1:${CAESCU}"  --to "udp+aesgcm[key=$(cat aes.hex)]://127.0.0.1:${SAESCU}"                                                                     --log info > aesgcm_udp_client.log  2>&1 &
+        "$NETX" tun --from "udp://127.0.0.1:${CFR}"     --to "tcp+framed[maxsize=4096]://127.0.0.1:${SFR}"                                                                              --log info > framed_tcp_client.log  2>&1 &
+        "$NETX" tun --from "tcp://127.0.0.1:${CTLSPSK}" --to "tcp+tlspsk[identity=i,key=$(cat psk.hex)]://127.0.0.1:${STLSPSK}"                                                         --log info > tlspsk_client.log      2>&1 &
+        "$NETX" tun --from "tcp://127.0.0.1:${CSSH}"    --to "tcp+ssh[pubkey=$(xxd -p ssh_server_key.pub | tr -d '\n'),key=$(xxd -p ssh_client_key | tr -d '\n')]://127.0.0.1:${SSSH}"  --log info > ssh_client.log         2>&1 &
+        "$NETX" tun --from "tcp://127.0.0.1:${CUTLS}"   --to "tcp+utls[cert=$(xxd -p server.crt | tr -d '\n'),hello=chrome]://127.0.0.1:${SUTLS}"                                       --log info > utls_client.log        2>&1 &
+        "$NETX" tun --from "udp://127.0.0.1:${CDNST}"   --to "[udp+dnst[domain=t.com]][id=00]://127.0.0.1:${SDNST_RES}"                                                                 --log info > dnst_client.log        2>&1 &
         # "$NETX" tun --from "tcp://127.0.0.1:${CREALITY}" --to "tcp+reality[publickey=$(cat reality_pub),shortid=$(cat reality_shortid),servername=www.google.com,fingerprint=chrome]://127.0.0.1:${SREALITY}" --log info > reality_client.log 2>&1 &
 
         sleep 2
+
 
         echo "Running tests..."
         pass=0; fail=0
@@ -208,6 +215,7 @@ tasks:
         pkill netx_lib || true
         pkill tcp_echo || true
         pkill udp_echo || true
+        pkill dns_resolver || true
 
         echo "Done."
         [ "$fail" -eq 0 ]

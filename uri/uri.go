@@ -5,12 +5,25 @@ import (
 	"strings"
 )
 
+type ServerURI struct {
+	URI
+}
+
+func (u *ServerURI) UnmarshalText(text []byte) error {
+	return u.URI.UnmarshalText(text, true)
+}
+
+type ClientURI struct {
+	URI
+}
+
+func (u *ClientURI) UnmarshalText(text []byte) error {
+	return u.URI.UnmarshalText(text, false)
+}
+
 type URI struct {
-	// This flag must be set if the URI is being applied to a listener (server side)
-	// The parser takes this into account when validating parameters
-	Listener bool
-	Scheme   `json:"scheme"`
-	Addr     string `json:"addr"`
+	Scheme `json:"scheme"`
+	Addr   string `json:"addr"`
 }
 
 func (u URI) String() string {
@@ -21,7 +34,7 @@ func (u URI) MarshalText() ([]byte, error) {
 	return []byte(u.String()), nil
 }
 
-func (u *URI) UnmarshalText(text []byte) error {
+func (u *URI) UnmarshalText(text []byte, server bool) error {
 	str := string(text)
 	parts := strings.SplitN(str, "://", 2)
 	if len(parts) < 2 {
@@ -33,7 +46,5 @@ func (u *URI) UnmarshalText(text []byte) error {
 		return fmt.Errorf("uri: empty address in %q", str)
 	}
 
-	u.Scheme.Listener = u.Listener
-
-	return u.Scheme.UnmarshalText([]byte(parts[0]))
+	return u.Scheme.UnmarshalText([]byte(parts[0]), server)
 }

@@ -71,7 +71,8 @@ func NewAESGCMConn(c net.Conn, key []byte, opts ...AESGCMOption) (net.Conn, erro
 	agc := &aesgcmConn{
 		Conn:          c,
 		aead:          a,
-		maxPacketSize: 32 * 1024}
+		maxPacketSize: 32 * 1024,
+	}
 	for _, opt := range opts {
 		opt(agc)
 	}

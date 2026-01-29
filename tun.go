@@ -3,6 +3,7 @@ package netx
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -47,6 +48,7 @@ func (t *Tun) halfCopy(src io.ReadCloser, dst io.WriteCloser, errCh chan<- error
 		buf = make([]byte, t.BufferSize)
 	}
 	defer t.Close()
+	fmt.Printf("TUN HALFCOPY START: Check Peer/Conn types. Src: %T, Dst: %T\n", src, dst)
 	_, err := io.CopyBuffer(dst, src, buf)
 	if t.shuttingDown() {
 		errCh <- nil

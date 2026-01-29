@@ -6,161 +6,107 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miekg/dns"
 	netx "github.com/pedramktb/go-netx"
 )
 
-// helper to create a DNS Tunnel pair over a framed connection (simulating packets)
-func newDNSPair(t *testing.T) (client net.Conn, server net.Conn) {
+func newDNSTPair(t *testing.T) (client net.Conn, server net.Conn) {
 	t.Helper()
+	// net.Pipe() provides a synchronous, in-memory, full duplex network connection.
+	// Both ends implement the Conn interface.
+	// Reads and writes on the pipe are matched one to one.
 	cr, sr := net.Pipe()
 	t.Cleanup(func() { _ = cr.Close(); _ = sr.Close() })
-
-	// Wrap in FramedConn to simulate packet boundaries for DNS packets
-	fc := netx.NewFramedConn(cr)
-	fs := netx.NewFramedConn(sr)
 
 	domain := "tunnel.example.com"
-	c := netx.NewDNSTClientConn(fc, domain)
-	s := netx.NewDNSTServerConn(fs, domain)
 
-	return c, s
+	client = netx.NewDNSTClientConn(cr, domain)
+	server = netx.NewDNSTServerConn(sr, domain)
+
+	return client, server
 }
 
-func TestDNSConn_Roundtrip(t *testing.T) {
-	client, server := newDNSPair(t)
+func TestDNST_Roundtrip(t *testing.T) {
+	c, s := newDNSTPair(t)
 
-	// Test case: Client sends "Hello", Server echoes "Hello"
-
-	msg := []byte("Hello DNS Tunnel")
-	done := make(chan error, 1)
-
-	// Server Echo Loop
+	// Test Client -> Server (encoded in Question)
+	msg1 := []byte("hello server")
 	go func() {
-		buf := make([]byte, 1024)
-		n, err := server.Read(buf)
-		if err != nil {
-			done <- err
-			return
+		if _, err := c.Write(msg1); err != nil {
+			t.Errorf("client write error: %v", err)
 		}
-		received := string(buf[:n])
-		if received != string(msg) {
-			// Just log, can't t.Errorf easily here
-		}
-		_, err = server.Write(buf[:n])
-		done <- err
 	}()
 
-	// Client Write
-	_, err := client.Write(msg)
+	// Give time for write to happen (not strictly necessary with net.Pipe but safe)
+	// Actually net.Pipe write blocks until read, so we must Read in main thread or vice versa.
+	
+	buf1 := make([]byte, len(msg1)+10) // buffer larger than msg
+	n1, err := s.Read(buf1)
 	if err != nil {
-		t.Fatalf("Client write error: %v", err)
+		t.Fatalf("server read error: %v", err)
+	}
+	if n1 != len(msg1) {
+		t.Errorf("server read len mismatch: got %d, want %d", n1, len(msg1))
+	}
+	if !bytes.Equal(buf1[:n1], msg1) {
+		t.Errorf("server read content mismatch: got %q, want %q", buf1[:n1], msg1)
 	}
 
-	// Client Read MUST happen to unblock Server's Write (due to net.Pipe)
-	respBuf := make([]byte, 1024)
-	n, err := client.Read(respBuf)
+	// Test Server -> Client (encoded in TXT Answer)
+	msg2 := []byte("hello client")
+	go func() {
+		if _, err := s.Write(msg2); err != nil {
+			t.Errorf("server write error: %v", err)
+		}
+	}()
+
+	buf2 := make([]byte, len(msg2)+10)
+	n2, err := c.Read(buf2)
 	if err != nil {
-		t.Fatalf("Client read error: %v", err)
+		t.Fatalf("client read error: %v", err)
+	}
+	if n2 != len(msg2) {
+		t.Errorf("client read len mismatch: got %d, want %d", n2, len(msg2))
+	}
+	if !bytes.Equal(buf2[:n2], msg2) {
+		t.Errorf("client read content mismatch: got %q, want %q", buf2[:n2], msg2)
+	}
+}
+
+func TestDNST_LargePacket(t *testing.T) {
+	c, s := newDNSTPair(t)
+
+	// Calculate max payload size roughly.
+	// Domain "tunnel.example.com" len is 18.
+	// Client Write limitation: base32(data) <= 255 - 18 - 1 = 236.
+	// max raw bytes ~= 236 * 5 / 8 = 147 bytes.
+
+	payload := bytes.Repeat([]byte("A"), 140)
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := c.Write(payload)
+		errCh <- err
+	}()
+
+	// If server read buffer is too small, this might fail with "dns: buffer too small" or "unpack error"
+	buf := make([]byte, 1024)
+	n, err := s.Read(buf)
+	if err != nil {
+		t.Fatalf("server read error: %v", err)
+	}
+	if n != len(payload) {
+		t.Errorf("server read len %d, want %d", n, len(payload))
+	}
+	if !bytes.Equal(buf[:n], payload) {
+		t.Errorf("server read content mismatch")
 	}
 
-	// Now we can check if server finished successfully
 	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("Server loop error: %v", err)
+	case writeErr := <-errCh:
+		if writeErr != nil {
+			t.Errorf("client write error: %v", writeErr)
 		}
-	case <-time.After(1 * time.Second):
-		t.Fatalf("Timeout waiting for server to finish")
-	}
-
-	clientReceived := string(respBuf[:n])
-	if clientReceived != string(msg) {
-		t.Errorf("Client received %q, want %q", clientReceived, string(msg))
-	}
-}
-
-func TestDNSConnChunking(t *testing.T) {
-	// Directly test chunks by inspecting the underlying connection?
-	// With net.Pipe, it's harder to inspect "packets" than with MockPacketConn.
-	// But we can verify that large messages still pass through correctly.
-
-	c, s := newDNSPair(t)
-
-	// DNS labels + domain overhead limits payload size.
-	// Our implementation chunks at 64 bytes for safety.
-	largeData := bytes.Repeat([]byte("AB"), 300) // 600 bytes
-
-	// Helper to write fully
-	go func() {
-		// Use io.Writer loop behavior
-		data := largeData
-		for len(data) > 0 {
-			n, err := c.Write(data)
-			if err != nil {
-				t.Errorf("Client write error: %v", err)
-				return
-			}
-			data = data[n:]
-		}
-	}()
-
-	receivedBuf := make([]byte, 1024)
-	totalRead := 0
-
-	// Read loop until we get everything
-	for totalRead < len(largeData) {
-		n, err := s.Read(receivedBuf[totalRead:])
-		if err != nil {
-			t.Fatalf("Server read error: %v", err)
-		}
-		totalRead += n
-	}
-
-	if !bytes.Equal(receivedBuf[:totalRead], largeData) {
-		t.Fatalf("Data mismatch")
-	}
-
-	// Check validation of packets by peeking?
-	// To strictly verifying "Wait for 2 packets", we'd need to intercept the pipe.
-	// But end-to-end verification is usually checking if chunking Works, not Implementation details.
-	// If chunking was broken, large data might fail to decode or be truncated.
-}
-
-func TestDNSConn_RawPackets(t *testing.T) {
-	// If we want to verify the actual DNS packet structure, we can use a half-pipe + FramedConn inspection.
-	cr, sr := net.Pipe()
-	t.Cleanup(func() { _ = cr.Close(); _ = sr.Close() })
-
-	fc := netx.NewFramedConn(cr)
-	// fs (Server Side Network) is where we read raw packets
-	fs := netx.NewFramedConn(sr)
-
-	client := netx.NewDNSTClientConn(fc, "t.com")
-
-	go client.Write([]byte("Short"))
-
-	// Read packet from "Network"
-	pktBuf := make([]byte, 4096)
-	n, err := fs.Read(pktBuf)
-	if err != nil {
-		t.Fatalf("Network read error: %v", err)
-	}
-
-	msg := new(dns.Msg)
-	if err := msg.Unpack(pktBuf[:n]); err != nil {
-		t.Fatalf("Unpack failed: %v", err)
-	}
-
-	if len(msg.Question) != 1 {
-		t.Errorf("Expected 1 question, got %d", len(msg.Question))
-	}
-	// "Short" in Base32 (Std, NoPadding) -> "KNIUG43U"
-	// Suffix "t.com."
-	// QName should be something like "kniug43u.t.com."
-
-	expectedSuffix := "t.com."
-	if len(msg.Question[0].Name) < len(expectedSuffix) {
-		t.Errorf("Question name too short: %s", msg.Question[0].Name)
+	case <-time.After(100 * time.Millisecond):
+		t.Errorf("timed out waiting for write result")
 	}
 }

@@ -23,15 +23,28 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-type Layers struct {
-	Listener bool
-	Layers   []Layer
+type ServerLayers struct {
+	Layers
 }
 
-func (ls Layers) Wrap(conn net.Conn) (net.Conn, error) {
+func (ls *ServerLayers) UnmarshalText(text []byte) error {
+	return ls.Layers.UnmarshalText(text, true)
+}
+
+type ClientLayers struct {
+	Layers
+}
+
+func (ls *ClientLayers) UnmarshalText(text []byte) error {
+	return ls.Layers.UnmarshalText(text, false)
+}
+
+type Layers []Layer
+
+func (ls Layers) WrapConn(conn net.Conn) (net.Conn, error) {
 	var err error
-	for _, l := range ls.Layers {
-		conn, err = l.Wrap(conn)
+	for _, l := range ls {
+		conn, err = l.WrapConn(conn)
 		if err != nil {
 			return nil, fmt.Errorf("wrap %q: %w", l.String(), err)
 		}
@@ -40,8 +53,8 @@ func (ls Layers) Wrap(conn net.Conn) (net.Conn, error) {
 }
 
 func (ls Layers) String() string {
-	strs := make([]string, len(ls.Layers))
-	for i, l := range ls.Layers {
+	strs := make([]string, len(ls))
+	for i, l := range ls {
 		strs[i] = l.String()
 	}
 	return strings.Join(strs, "+")
@@ -51,12 +64,19 @@ func (ls Layers) MarshalText() ([]byte, error) {
 	return []byte(ls.String()), nil
 }
 
-func (ls *Layers) UnmarshalText(text []byte) error {
+func (ls Layers) MarshalJSON() ([]byte, error) {
+	return json.Marshal(ls)
+}
+
+func (ls *Layers) UnmarshalJSON(data []byte) error {
+	return json.Unmarshal(data, &ls)
+}
+
+func (ls *Layers) UnmarshalText(text []byte, server bool) error {
 	parts := strings.Split(string(text), "+")
-	ls.Layers = make([]Layer, len(parts))
+	*ls = make([]Layer, len(parts))
 	for i := range parts {
-		ls.Layers[i].Listener = ls.Listener
-		if err := ls.Layers[i].UnmarshalText([]byte(parts[i])); err != nil {
+		if err := (*ls)[i].UnmarshalText([]byte(parts[i]), server); err != nil {
 			return err
 		}
 	}
@@ -64,22 +84,29 @@ func (ls *Layers) UnmarshalText(text []byte) error {
 	return nil
 }
 
-func (ls Layers) MarshalJSON() ([]byte, error) {
-	return json.Marshal(ls.Layers)
+type ServerLayer struct {
+	Layer
 }
 
-func (ls *Layers) UnmarshalJSON(data []byte) error {
-	return json.Unmarshal(data, &ls.Layers)
+func (l *ServerLayer) UnmarshalText(text []byte) error {
+	return l.Layer.UnmarshalText(text, true)
+}
+
+type ClientLayer struct {
+	Layer
+}
+
+func (l *ClientLayer) UnmarshalText(text []byte) error {
+	return l.Layer.UnmarshalText(text, false)
 }
 
 type Layer struct {
-	Listener bool
-	Prot     string
-	Params   map[string]string
-	wrap     func(net.Conn) (net.Conn, error)
+	Prot   string
+	Params map[string]string
+	wrap   func(net.Conn) (net.Conn, error)
 }
 
-func (l Layer) Wrap(conn net.Conn) (net.Conn, error) {
+func (l Layer) WrapConn(conn net.Conn) (net.Conn, error) {
 	if l.wrap == nil {
 		return conn, nil
 	}
@@ -101,7 +128,7 @@ func (l Layer) MarshalText() ([]byte, error) {
 	return []byte(l.String()), nil
 }
 
-func (l *Layer) UnmarshalText(text []byte) error {
+func (l *Layer) UnmarshalText(text []byte, server bool) error {
 	str := string(text)
 
 	l.Prot = strings.ToLower(strings.TrimSpace(str))
@@ -111,7 +138,7 @@ func (l *Layer) UnmarshalText(text []byte) error {
 			return fmt.Errorf("uri: missing ']' in layer %q", str)
 		}
 		l.Prot = strings.ToLower(strings.TrimSpace(str[:idx]))
-		for _, pair := range strings.Split(str[idx+1:len(str)-1], ",") {
+		for pair := range strings.SplitSeq(str[idx+1:len(str)-1], ",") {
 			kv := strings.SplitN(pair, "=", 2)
 			if len(kv) != 2 {
 				return fmt.Errorf("uri: invalid parameter %q", pair)
@@ -126,6 +153,18 @@ func (l *Layer) UnmarshalText(text []byte) error {
 	}
 
 	switch l.Prot {
+	case "dnst":
+		fmt.Println("URI LAYER PARSING DNST")
+		domain := l.Params["domain"]
+		if domain == "" {
+			return fmt.Errorf("uri: missing dnst domain parameter")
+		}
+		l.wrap = func(c net.Conn) (net.Conn, error) {
+			if server {
+				return netx.NewDNSTServerConn(c, domain), nil
+			}
+			return netx.NewDNSTClientConn(c, domain), nil
+		}
 	case "framed":
 		opts := []netx.FramedConnOption{}
 		for key, value := range l.Params {
@@ -159,25 +198,6 @@ func (l *Layer) UnmarshalText(text []byte) error {
 		}
 		l.wrap = func(c net.Conn) (net.Conn, error) {
 			return netx.NewBufConn(c, opts...), nil
-		}
-	case "dns":
-		var domain string
-		for key, value := range l.Params {
-			switch key {
-			case "domain":
-				domain = value
-			default:
-				return fmt.Errorf("uri: unknown dns parameter %q", key)
-			}
-		}
-		if domain == "" {
-			return fmt.Errorf("uri: missing dns domain parameter")
-		}
-		l.wrap = func(c net.Conn) (net.Conn, error) {
-			if l.Listener {
-				return netx.NewDNSTServerConn(c, domain), nil
-			}
-			return netx.NewDNSTClientConn(c, domain), nil
 		}
 	case "aesgcm":
 		aeskey := []byte{}
@@ -239,7 +259,7 @@ func (l *Layer) UnmarshalText(text []byte) error {
 				return fmt.Errorf("uri: unknown ssh parameter %q", key)
 			}
 		}
-		if l.Listener {
+		if server {
 			cfg := &ssh.ServerConfig{}
 			if sshkey == nil {
 				return fmt.Errorf("uri: ssh server requires key parameter")
@@ -317,7 +337,7 @@ func (l *Layer) UnmarshalText(text []byte) error {
 				return fmt.Errorf("uri: unknown tls parameter %q", key)
 			}
 		}
-		if l.Listener {
+		if server {
 			if cert == nil || certKey == nil {
 				return fmt.Errorf("uri: tls server requires cert and key parameters")
 			}
@@ -349,7 +369,7 @@ func (l *Layer) UnmarshalText(text []byte) error {
 			}
 		}
 	case "utls":
-		if l.Listener {
+		if server {
 			return errors.New("uri: utls is exclusive to clients, use tls for servers instead")
 		}
 		var cert []byte
@@ -431,7 +451,7 @@ func (l *Layer) UnmarshalText(text []byte) error {
 				return fmt.Errorf("uri: unknown dtls parameter %q", key)
 			}
 		}
-		if l.Listener {
+		if server {
 			if cert == nil || certKey == nil {
 				return fmt.Errorf("uri: dtls server requires cert and key parameters")
 			}
@@ -482,7 +502,7 @@ func (l *Layer) UnmarshalText(text []byte) error {
 		if len(psk) == 0 {
 			return fmt.Errorf("uri: missing tlspsk key parameter")
 		}
-		if !l.Listener && identity == "" {
+		if !server && identity == "" {
 			return fmt.Errorf("uri: tlspsk client requires identity parameter")
 		}
 		cfg := &tlswithpks.Config{
@@ -495,7 +515,7 @@ func (l *Layer) UnmarshalText(text []byte) error {
 			CipherSuites:       []uint16{tlspks.TLS_PSK_WITH_AES_256_CBC_SHA},
 			InsecureSkipVerify: true,
 		}
-		if l.Listener {
+		if server {
 			// Provide dummy Certificates to make tlspsk happy on server side
 			cfg.Certificates = dummyCert()
 			l.wrap = func(c net.Conn) (net.Conn, error) {
@@ -526,7 +546,7 @@ func (l *Layer) UnmarshalText(text []byte) error {
 		if len(psk) == 0 {
 			return fmt.Errorf("uri: missing dtlspsk key parameter")
 		}
-		if !l.Listener && identity == "" {
+		if !server && identity == "" {
 			return fmt.Errorf("uri: dtlspsk client requires identity parameter")
 		}
 		cfg := &dtls.Config{
@@ -537,7 +557,7 @@ func (l *Layer) UnmarshalText(text []byte) error {
 			CipherSuites:       []dtls.CipherSuiteID{dtls.TLS_PSK_WITH_AES_128_GCM_SHA256},
 			InsecureSkipVerify: true,
 		}
-		if l.Listener {
+		if server {
 			l.wrap = func(c net.Conn) (net.Conn, error) {
 				return dtls.Server(dtlsnet.PacketConnFromConn(c), c.RemoteAddr(), cfg)
 			}

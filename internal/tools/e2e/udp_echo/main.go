@@ -30,7 +30,9 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		log.Printf("udp_echo: read %d bytes from %s", n, ra)
 		conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 		_, _ = conn.WriteToUDP(buf[:n], ra)
+		log.Printf("udp_echo: wrote %d bytes back to %s", n, ra)
 	}
 }

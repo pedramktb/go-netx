@@ -16,10 +16,8 @@ Ref: https://web.archive.org/web/20200208203702/http://gray-world.net/papers/dns
 package netx
 
 import (
-	"bytes"
 	"encoding/base32"
-	"encoding/hex"
-	"fmt"
+	"errors"
 	"io"
 	"net"
 	"strings"
@@ -29,203 +27,183 @@ import (
 
 type dnstClientConn struct {
 	net.Conn
-	domain  string
-	readBuf bytes.Buffer
+	encoding           *base32.Encoding
+	domain             string
+	maxReadPacketSize  int
+	maxWritePacketSize int
+}
+
+type DNSTClientOption func(*dnstClientConn)
+
+// WithMaxReadPacket sets the maximum ciphertext packet size accepted on Read.
+// Default is 765 bytes, which given a 255 byte QNAME is the maximum based on a UDP transport with an MTU of 1500.
+func WithDNSTMaxReadPacket(size uint32) DNSTClientOption {
+	return func(c *dnstClientConn) {
+		c.maxReadPacketSize = int(size)
+	}
 }
 
 // NewDNSTClientConn creates a new DNST client connection.
-func NewDNSTClientConn(conn net.Conn, domain string) net.Conn {
-	return &dnstClientConn{
-		Conn:   conn,
-		domain: strings.TrimSuffix(domain, ".") + ".",
+// MaxWritePacketSize is set based on the domain length to fit within DNS limits. (This does not account for Base32 overhead.)
+func NewDNSTClientConn(conn net.Conn, domain string, opts ...DNSTClientOption) net.Conn {
+	dt := &dnstClientConn{
+		Conn:               conn,
+		encoding:           base32.StdEncoding.WithPadding(base32.NoPadding),
+		domain:             strings.TrimSuffix(domain, "."),
+		maxReadPacketSize:  765,
+		maxWritePacketSize: 255 - len(domain) - 4, // -4 for periods added in encoding
 	}
+	for _, opt := range opts {
+		opt(dt)
+	}
+	return dt
 }
 
 func (c *dnstClientConn) Read(b []byte) (n int, err error) {
-	// If we have leftovers from a previous packet, return those.
-	if c.readBuf.Len() > 0 {
-		return c.readBuf.Read(b)
-	}
-
-	// Read from the underlying connection
-	buf := make([]byte, 2048)
+	buf := make([]byte, c.maxReadPacketSize)
 	n, err = c.Conn.Read(buf)
 	if err != nil {
 		return 0, err
 	}
-	pkt := buf[:n]
-
 	msg := new(dns.Msg)
-	if err := msg.Unpack(pkt); err != nil {
-		// return nil (0 bytes read) to ignore garbage packets instead of throwing error
-		return 0, nil
+	err = msg.Unpack(buf[:n])
+	if err != nil {
+		return 0, err
 	}
-
-	var payload []byte
-	// CLIENT SIDE: Extract payload from TXT in Answer
-	for _, ans := range msg.Answer {
-		if txt, ok := ans.(*dns.TXT); ok {
-			joined := strings.Join(txt.Txt, "")
-			if p, err := hex.DecodeString(joined); err == nil {
-				payload = append(payload, p...)
-			} else {
-				// Fallback to raw bytes?
-				payload = append(payload, []byte(joined)...)
-			}
+	if len(msg.Answer) == 0 {
+		return 0, errors.New("dnst: no answer in DNS response")
+	}
+	if txt, ok := msg.Answer[0].(*dns.TXT); ok {
+		if len(txt.Txt) == 0 {
+			return 0, errors.New("dnst: no TXT record in DNS answer")
 		}
+		if len(txt.Txt[0]) > len(b) {
+			return len(b), io.ErrShortBuffer
+		}
+		copy(b, txt.Txt[0])
+		return len(txt.Txt[0]), nil
 	}
-
-	if len(payload) > 0 {
-		c.readBuf.Write(payload)
-	}
-
-	return c.readBuf.Read(b)
+	return 0, errors.New("dnst: no TXT record in DNS answer")
 }
 
-func (c *dnstClientConn) Write(b []byte) (int, error) {
-	// Send ONE DNS Query packet containing as much of b as fits (or default chunk size)
-	chunkSize := 64
-	n := min(chunkSize, len(b))
-	chunk := b[:n]
+func (c *dnstClientConn) Write(b []byte) (n int, err error) {
+	data := c.encoding.EncodeToString(b)
 
-	encoded := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(chunk)
-	// Split into 63 char labels
-	var labels []string
-	encLen := len(encoded)
-	for encLen > 0 {
-		k := min(63, encLen)
-		labels = append(labels, encoded[:k])
-		encoded = encoded[k:]
-		encLen = len(encoded)
+	// Split data into 63-character chunks (DNS label limit)
+	var parts []string
+	for len(data) > 63 {
+		parts = append(parts, data[:63])
+		data = data[63:]
 	}
+	parts = append(parts, data)
+	encoded := strings.Join(parts, ".")
 
-	qname := strings.Join(labels, ".") + "." + c.domain
-
+	if len(encoded) > c.maxWritePacketSize {
+		return 0, errors.New("dnst: packet may be truncated; increase maxWritePacketSize or frame the packets")
+	}
 	msg := new(dns.Msg)
-	msg.SetQuestion(qname, dns.TypeTXT)
-	msg.Id = dns.Id()
-	msg.RecursionDesired = true
-
-	packed, err := msg.Pack()
+	msg.SetQuestion(strings.ToLower(encoded+"."+c.domain+"."), dns.TypeTXT)
+	buf, err := msg.Pack()
 	if err != nil {
 		return 0, err
 	}
-
-	_, err = c.Conn.Write(packed)
+	n, err = c.Conn.Write(buf)
 	if err != nil {
 		return 0, err
 	}
-
-	return n, nil
+	if n != len(buf) {
+		return 0, io.ErrShortWrite
+	}
+	return len(b), nil
 }
 
-// dnsServerConn handles the server side of the DNST.
 type dnstServerConn struct {
 	net.Conn
-	domain string
+	encoding           *base32.Encoding
+	domain             string
+	maxReadPacketSize  int
+	maxWritePacketSize int
+}
+type DNSTServerOption func(*dnstServerConn)
 
-	// Buffer for payload extracted from queries
-	readBuf bytes.Buffer
-	// The query we are currently processing/replying to
-	lastQuery *dns.Msg
+// WithMaxWritePacket sets the maximum ciphertext packet size accepted on write.
+// Default is 765 bytes, which given a 255 byte QNAME is the maximum based on a UDP transport with an MTU of 1500.
+func WithDNSTMaxWritePacket(size uint32) DNSTServerOption {
+	return func(c *dnstServerConn) {
+		c.maxWritePacketSize = int(size)
+	}
 }
 
 // NewDNSTServerConn creates a new DNST server connection.
 func NewDNSTServerConn(conn net.Conn, domain string) net.Conn {
 	return &dnstServerConn{
-		Conn:   conn,
-		domain: strings.TrimSuffix(domain, ".") + ".",
+		Conn:               conn,
+		encoding:           base32.StdEncoding.WithPadding(base32.NoPadding),
+		domain:             strings.TrimSuffix(domain, ".") + ".",
+		maxReadPacketSize:  512,
+		maxWritePacketSize: 765,
 	}
 }
 
 func (c *dnstServerConn) Read(b []byte) (n int, err error) {
-	// If we have leftovers from a previous packet, return those.
-	if c.readBuf.Len() > 0 {
-		return c.readBuf.Read(b)
-	}
-
-	// Read from the underlying connection
-	buf := make([]byte, 2048)
+	buf := make([]byte, c.maxReadPacketSize)
 	n, err = c.Conn.Read(buf)
 	if err != nil {
 		return 0, err
 	}
-	pkt := buf[:n]
-
 	msg := new(dns.Msg)
-	if err := msg.Unpack(pkt); err != nil {
-		// If we can't unpack, return 0 for garbage/invalid packet
-		return 0, nil
+	err = msg.Unpack(buf[:n])
+	if err != nil {
+		return 0, err
 	}
-
-	var payload []byte
-
-	// SERVER SIDE: Extract payload from Query Name
-	if len(msg.Question) > 0 {
-		q := msg.Question[0]
-		name := strings.ToLower(q.Name)
-		if strings.HasSuffix(name, c.domain) {
-			encoded := strings.TrimSuffix(name, c.domain)
-			encoded = strings.TrimSuffix(encoded, ".")
-			encoded = strings.ReplaceAll(encoded, ".", "")
-
-			if p, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(encoded)); err == nil {
-				payload = p
-			} else if p, err := base32.StdEncoding.DecodeString(strings.ToUpper(encoded)); err == nil {
-				payload = p
-			} else {
-				fmt.Printf("Decode error: %v for %s\n", err, encoded)
-			}
-		} else {
-			fmt.Printf("Suffix mismatch. Name: %s Domain: %s\n", name, c.domain)
-		}
-		// Store the query so Write() can use it to reply
-		c.lastQuery = msg
+	if len(msg.Question) == 0 {
+		return 0, errors.New("dnst: no question in DNS query")
 	}
+	q := msg.Question[0]
+	// Remove domain suffix
+	data := strings.TrimSuffix(strings.ToLower(q.Name), "."+strings.ToLower(c.domain))
+	data = strings.TrimSuffix(data, ".")
+	// Remove dots from label splitting
+	data = strings.ReplaceAll(data, ".", "")
+	// Normalize to upper case for base32 decoding
+	data = strings.ToUpper(data)
 
-	if len(payload) > 0 {
-		c.readBuf.Write(payload)
+	decoded, err := c.encoding.DecodeString(data)
+	if err != nil {
+		return 0, err
 	}
-
-	return c.readBuf.Read(b)
+	if len(decoded) > len(b) {
+		return len(b), io.ErrShortBuffer
+	}
+	copy(b, decoded)
+	return len(decoded), nil
 }
 
-func (c *dnstServerConn) Write(b []byte) (int, error) {
-	if c.lastQuery == nil {
-		return 0, io.ErrShortWrite // Or a specific "no active query" error
+func (c *dnstServerConn) Write(b []byte) (n int, err error) {
+	if len(b) > c.maxWritePacketSize {
+		return 0, errors.New("dnst: packet may be truncated; increase maxWritePacketSize or frame the packets")
 	}
-
-	// Reply to the single active query we have
-	chunkSize := 128
-	n := min(chunkSize, len(b))
-	chunk := b[:n]
-
-	resp := new(dns.Msg)
-	resp.SetReply(c.lastQuery)
-
-	encoded := hex.EncodeToString(chunk)
-
 	txt := &dns.TXT{
 		Hdr: dns.RR_Header{
-			Name:   c.lastQuery.Question[0].Name,
+			Name:   c.domain,
 			Rrtype: dns.TypeTXT,
 			Class:  dns.ClassINET,
 			Ttl:    0,
 		},
-		Txt: []string{encoded},
+		Txt: []string{string(b)},
 	}
-	resp.Answer = append(resp.Answer, txt)
-
-	packed, err := resp.Pack()
+	msg := new(dns.Msg)
+	msg.Answer = []dns.RR{txt}
+	buf, err := msg.Pack()
 	if err != nil {
 		return 0, err
 	}
-
-	_, err = c.Conn.Write(packed)
+	n, err = c.Conn.Write(buf)
 	if err != nil {
 		return 0, err
 	}
-
-	c.lastQuery = nil // Consumed
-	return n, nil
+	if n != len(buf) {
+		return 0, io.ErrShortWrite
+	}
+	return len(b), nil
 }
