@@ -4,50 +4,85 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // ServerMux combines the functionality of a connection pool and a session multiplexer.
 // It listens on a physical net.Listener, accepts connections, wraps them (optional),
 // reads a session ID, and routes traffic to persistent virtual sessions.
-type ServerMux struct {
+type serverMux struct {
 	net.Listener
-	idMask  int // length of ID prefix in bytes
-	wrapper func(net.Conn) (net.Conn, error)
-
-	mu       sync.Mutex
-	sessions map[string]*muxSession
-	acceptCh chan net.Conn
-	closed   chan struct{}
+	idMask                int // length of ID prefix in bytes
+	wrapper               func(net.Conn) (net.Conn, error)
+	mu                    sync.Mutex
+	closing               atomic.Bool
+	acceptQueue           chan net.Conn
+	sessions              map[string]*muxSession
+	sessionReadQueueSize  int
+	sessionReadBufferSize int
+	sync                  bool
 }
 
-type ServerMuxOption func(*ServerMux)
+type ServerMuxOption func(*serverMux)
 
+// WithServerMuxWrapper sets a connection wrapper for the ServerMux.
+// The wrapper is applied to each incoming connection before reading the session ID.
 func WithServerMuxWrapper(wrapper func(net.Conn) (net.Conn, error)) ServerMuxOption {
-	return func(m *ServerMux) {
+	return func(m *serverMux) {
 		m.wrapper = wrapper
+	}
+}
+
+// WithServerAcceptQueueSize sets the size of the accept queue for the ServerMux.
+// Default is 128.
+func WithServerAcceptQueueSize(size uint32) ServerMuxOption {
+	return func(m *serverMux) {
+		m.acceptQueue = make(chan net.Conn, size)
+	}
+}
+
+// WithServerSessionReadQueueSize sets the size of the read queue for each session.
+// This controls how much data can be stored in memory per session before blocking reads.
+// Default is 128.
+func WithServerSessionReadQueueSize(size uint32) ServerMuxOption {
+	return func(m *serverMux) {
+		m.sessionReadQueueSize = int(size)
+	}
+}
+
+// WithServerSessionReadBufferSize sets the size of the read buffer for each session.
+// This controls how much data is read from the underlying connection at once.
+// Default is 4096.
+func WithServerSessionReadBufferSize(size uint32) ServerMuxOption {
+	return func(m *serverMux) {
+		m.sessionReadBufferSize = int(size)
+	}
+}
+
+// WithServerSyncMode enables synchronous mode for the ServerMux.
+// In this mode, writes will happen synchronously to the connection that data is read from.
+// Default is asynchronous.
+func WithServerSyncMode() ServerMuxOption {
+	return func(m *serverMux) {
+		m.sync = true
 	}
 }
 
 // NewServerMux creates a new ServerMux.
 // ln: The physical listener.
 // idMask: The length of the session ID prefix in bytes.
-func NewServerMux(ln net.Listener, idMask int, opts ...ServerMuxOption) *ServerMux {
-	m := &ServerMux{
-		Listener: ln,
-		idMask:   idMask,
-		sessions: make(map[string]*muxSession),
-		acceptCh: make(chan net.Conn, 100),
-		closed:   make(chan struct{}),
+func NewServerMux(ln net.Listener, idMask int, opts ...ServerMuxOption) *serverMux {
+	m := &serverMux{
+		Listener:             ln,
+		idMask:               idMask,
+		acceptQueue:          make(chan net.Conn, 128),
+		sessions:             make(map[string]*muxSession),
+		sessionReadQueueSize: 128,
 	}
 	for _, opt := range opts {
 		opt(m)
 	}
-	return m
-}
-
-// TODO: Return the underlying error from Accept instead of net.ErrClosed when applicable.
-func (m *ServerMux) Accept() (net.Conn, error) {
 	go func() {
 		for {
 			c, err := m.Listener.Accept()
@@ -58,27 +93,22 @@ func (m *ServerMux) Accept() (net.Conn, error) {
 			go m.handleConn(c)
 		}
 	}()
-	select {
-	case c, ok := <-m.acceptCh:
-		if !ok {
-			return nil, net.ErrClosed
-		}
-		return c, nil
-	case <-m.closed:
-		return nil, net.ErrClosed
-	}
+	return m
 }
 
-func (m *ServerMux) Close() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	select {
-	case <-m.closed:
-		return nil
-	default:
+func (m *serverMux) Accept() (net.Conn, error) {
+	c, ok := <-m.acceptQueue
+	if !ok {
+		return nil, net.ErrClosed
 	}
-	close(m.closed)
-	close(m.acceptCh)
+	return c, nil
+}
+
+func (m *serverMux) Close() error {
+	if !m.closing.CompareAndSwap(false, true) {
+		return nil
+	}
+	close(m.acceptQueue)
 	for _, s := range m.sessions {
 		s.Close()
 	}
@@ -86,7 +116,7 @@ func (m *ServerMux) Close() error {
 	return m.Listener.Close()
 }
 
-func (m *ServerMux) handleConn(c net.Conn) {
+func (m *serverMux) handleConn(c net.Conn) {
 	// Important to (un)wrap before reading ID as the whole purpose of the wrapper may be to
 	// obscure the ID or detecting it's existence.
 	if m.wrapper != nil {
@@ -112,7 +142,7 @@ func (m *ServerMux) handleConn(c net.Conn) {
 	}
 }
 
-func (m *ServerMux) routeConn(id []byte, c net.Conn) {
+func (m *serverMux) routeConn(id []byte, c net.Conn) {
 	m.mu.Lock()
 	if m.sessions == nil { // Closed
 		m.mu.Unlock()
@@ -125,8 +155,10 @@ func (m *ServerMux) routeConn(id []byte, c net.Conn) {
 		sess = newMuxSession(id, m)
 		m.sessions[string(id)] = sess
 		select {
-		case m.acceptCh <- sess:
-		case <-m.closed:
+		case m.acceptQueue <- sess:
+		default:
+			// Accept queue full or closed, drop session
+			sess.Close()
 			m.mu.Unlock()
 			c.Close()
 			return
@@ -141,7 +173,7 @@ func (m *ServerMux) routeConn(id []byte, c net.Conn) {
 	sess.readLoop(c)
 }
 
-func (m *ServerMux) removeSession(id []byte) {
+func (m *serverMux) removeSession(id []byte) {
 	m.mu.Lock()
 	if m.sessions != nil {
 		delete(m.sessions, string(id))
@@ -151,45 +183,42 @@ func (m *ServerMux) removeSession(id []byte) {
 
 // muxSession represents a persistent virtual connection
 type muxSession struct {
-	id     []byte
-	parent *ServerMux
-
-	mu         sync.Mutex
-	activeConn net.Conn
-
-	readCh  chan []byte
-	readBuf []byte
-
-	closed chan struct{}
-	once   sync.Once
+	parent    *serverMux
+	id        []byte
+	mu        sync.Mutex
+	closing   atomic.Bool
+	conn      net.Conn // currently active connection
+	readQueue chan []byte
+	readBuf   []byte
 }
 
-func newMuxSession(id []byte, parent *ServerMux) *muxSession {
+func newMuxSession(id []byte, parent *serverMux) *muxSession {
 	return &muxSession{
-		id:     id,
-		parent: parent,
-		readCh: make(chan []byte, 100),
-		closed: make(chan struct{}),
+		parent:    parent,
+		id:        id,
+		readQueue: make(chan []byte, parent.sessionReadQueueSize),
 	}
 }
 
 func (s *muxSession) attach(c net.Conn) {
 	s.mu.Lock()
-	s.activeConn = c
+	s.conn = c
 	s.mu.Unlock()
 }
 
 func (s *muxSession) readLoop(c net.Conn) {
 	defer c.Close()
-	buf := make([]byte, 4096)
+	buf := make([]byte, s.parent.sessionReadBufferSize)
 	for {
 		n, err := c.Read(buf)
 		if n > 0 {
-			chunk := make([]byte, n)
-			copy(chunk, buf[:n])
 			select {
-			case s.readCh <- chunk:
-			case <-s.closed:
+			case s.readQueue <- buf[:n]:
+				if s.parent.sync {
+					// TODO: force write to the same connection if in sync mode
+				}
+			default:
+				// Read queue full or connection closed
 				return
 			}
 		}
@@ -200,43 +229,37 @@ func (s *muxSession) readLoop(c net.Conn) {
 }
 
 func (s *muxSession) Read(b []byte) (n int, err error) {
-	if len(s.readBuf) > 0 {
-		n = copy(b, s.readBuf)
-		s.readBuf = s.readBuf[n:]
-		return n, nil
-	}
-
-	select {
-	case data := <-s.readCh:
-		n = copy(b, data)
-		if n < len(data) {
-			s.readBuf = data[n:]
-		}
-		return n, nil
-	case <-s.closed:
+	data, ok := <-s.readQueue
+	if !ok {
 		return 0, io.EOF
 	}
+	if len(b) < len(data) {
+		return 0, io.ErrShortBuffer
+	}
+	n = copy(b, data)
+	return n, nil
 }
 
 func (s *muxSession) Write(b []byte) (n int, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.activeConn == nil {
+	if s.conn == nil {
 		return 0, io.ErrClosedPipe
 	}
-	return s.activeConn.Write(b)
+	return s.conn.Write(b)
 }
 
 func (s *muxSession) Close() error {
-	s.once.Do(func() {
-		close(s.closed)
-		s.parent.removeSession(s.id)
-		s.mu.Lock()
-		if s.activeConn != nil {
-			s.activeConn.Close()
-		}
-		s.mu.Unlock()
-	})
+	if !s.closing.CompareAndSwap(false, true) {
+		return nil
+	}
+	close(s.readQueue)
+	s.parent.removeSession(s.id)
+	s.mu.Lock()
+	if s.conn != nil {
+		s.conn.Close()
+	}
+	s.mu.Unlock()
 	return nil
 }
 
@@ -246,8 +269,8 @@ func (s *muxSession) LocalAddr() net.Addr { return s.parent.Addr() }
 func (s *muxSession) RemoteAddr() net.Addr {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.activeConn != nil {
-		return s.activeConn.RemoteAddr()
+	if s.conn != nil {
+		return s.conn.RemoteAddr()
 	}
 	return &net.IPAddr{}
 }

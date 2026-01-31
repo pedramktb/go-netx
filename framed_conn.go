@@ -39,11 +39,11 @@ func WithMaxFrameSize(size uint32) FramedConnOption {
 // NewFramedConn wraps a net.Conn with a simple length-prefixed framing protocol.
 // Each frame is prefixed with a 4-byte big-endian unsigned integer indicating the length of the frame.
 // If the frame size exceeds maxFrameSize, Read will return ErrFrameTooLarge.
-// The default maxFrameSize is 32KB.
+// The default maxFrameSize is 4KB.
 func NewFramedConn(c net.Conn, opts ...FramedConnOption) net.Conn {
 	fc := &framedConn{
 		Conn:         c,
-		maxFrameSize: 32 * 1024, // 32KB default max frame size
+		maxFrameSize: 4096,
 	}
 	for _, opt := range opts {
 		opt(fc)
