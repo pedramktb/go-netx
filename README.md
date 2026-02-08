@@ -1,4 +1,4 @@
-# netx
+# <img src="./netx.svg" alt="netx" />
 
 Small, focused extensions to Go's "net" standard library.
 

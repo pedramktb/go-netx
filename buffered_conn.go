@@ -12,8 +12,31 @@ package netx
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"net"
+	"strconv"
 )
+
+func init() {
+	Register("buffered", FuncDriver(func(params map[string]string, listener bool) (Wrapper, error) {
+		opts := []BufConnOption{}
+		for key, value := range params {
+			switch key {
+			case "size":
+				size, err := strconv.ParseUint(value, 10, 31)
+				if err != nil {
+					return nil, fmt.Errorf("uri: invalid buffered size parameter %q: %w", value, err)
+				}
+				opts = append(opts, WithBufSize(uint32(size)))
+			default:
+				return nil, fmt.Errorf("uri: unknown buffered parameter %q", key)
+			}
+		}
+		return func(c net.Conn) (net.Conn, error) {
+			return NewBufConn(c, opts...), nil
+		}, nil
+	}))
+}
 
 type BufConn interface {
 	net.Conn

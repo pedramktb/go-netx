@@ -14,10 +14,33 @@ package netx
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"sync"
 )
+
+func init() {
+	Register("framed", FuncDriver(func(params map[string]string, listener bool) (Wrapper, error) {
+		opts := []FramedConnOption{}
+		for key, value := range params {
+			switch key {
+			case "maxsize":
+				maxSize, err := strconv.ParseUint(value, 10, 31)
+				if err != nil {
+					return nil, fmt.Errorf("uri: invalid framed maxsize parameter %q: %w", value, err)
+				}
+				opts = append(opts, WithMaxFrameSize(uint32(maxSize)))
+			default:
+				return nil, fmt.Errorf("uri: unknown framed parameter %q", key)
+			}
+		}
+		return func(c net.Conn) (net.Conn, error) {
+			return NewFramedConn(c, opts...), nil
+		}, nil
+	}))
+}
 
 var ErrFrameTooLarge = errors.New("framedConn: frame too large")
 
