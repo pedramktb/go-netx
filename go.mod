@@ -3,7 +3,7 @@ module github.com/pedramktb/go-netx
 go 1.25.1
 
 require (
-	github.com/pion/dtls/v3 v3.0.9
+	github.com/pion/dtls/v3 v3.1.0
 	github.com/pion/transport/v3 v3.1.1
 	github.com/raff/tls-ext v1.0.0
 	github.com/raff/tls-psk v1.0.0
@@ -18,6 +18,7 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.18.1 // indirect
 	github.com/pion/logging v0.2.4 // indirect
+	github.com/pion/transport/v4 v4.0.1 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	golang.org/x/sys v0.39.0 // indirect
 )
