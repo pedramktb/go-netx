@@ -1,8 +1,9 @@
-# <img src="./netx.svg" alt="netx" />
+# <img src="./netx.svg" alt="netX" />
 
-Small, focused extensions to Go's "net" standard library.
+netX or network extended is a collection of small, focused extensions to Go's "net" standard library.
 
-This library provides a few composable building blocks that integrate with standard `net.Conn` and `net.Listener` types without introducing heavy abstractions.
+It provides composable building blocks that integrate well with standard `net.Conn` and `net.Listener` types without introducing heavy abstractions,
+only introducing new interfaces and types where necessary to expose real functionality.
 
 ## Contents
 - [Highlights](#highlights)
@@ -183,10 +184,10 @@ You can plug any logger that implements the simple `Logger` interface:
 
 ```go
 type Logger interface {
-		DebugContext(ctx context.Context, msg string, args ...any)
-		InfoContext(ctx context.Context, msg string, args ...any)
-		WarnContext(ctx context.Context, msg string, args ...any)
-		ErrorContext(ctx context.Context, msg string, args ...any)
+	DebugContext(ctx context.Context, msg string, args ...any)
+	InfoContext(ctx context.Context, msg string, args ...any)
+	WarnContext(ctx context.Context, msg string, args ...any)
+	ErrorContext(ctx context.Context, msg string, args ...any)
 }
 ```
 

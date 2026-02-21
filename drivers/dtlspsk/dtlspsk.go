@@ -11,7 +11,7 @@ import (
 )
 
 func init() {
-	netx.Register("dtlspsk", netx.FuncDriver(func(params map[string]string, listener bool) (netx.Wrapper, error) {
+	netx.Register("dtlspsk", func(params map[string]string, listener bool) (netx.Wrapper, error) {
 		var identity string
 		var psk []byte
 		for key, value := range params {
@@ -20,19 +20,19 @@ func init() {
 				var err error
 				psk, err = hex.DecodeString(value)
 				if err != nil {
-					return nil, fmt.Errorf("uri: invalid dtlspsk key parameter: %w", err)
+					return netx.Wrapper{}, fmt.Errorf("uri: invalid dtlspsk key parameter: %w", err)
 				}
 			case "identity":
 				identity = value
 			default:
-				return nil, fmt.Errorf("uri: unknown dtlspsk parameter %q", key)
+				return netx.Wrapper{}, fmt.Errorf("uri: unknown dtlspsk parameter %q", key)
 			}
 		}
 		if len(psk) == 0 {
-			return nil, fmt.Errorf("uri: missing dtlspsk key parameter")
+			return netx.Wrapper{}, fmt.Errorf("uri: missing dtlspsk key parameter")
 		}
 		if !listener && identity == "" {
-			return nil, fmt.Errorf("uri: dtlspsk client requires identity parameter")
+			return netx.Wrapper{}, fmt.Errorf("uri: dtlspsk client requires identity parameter")
 		}
 		cfg := &dtls.Config{
 			PSK: func(hint []byte) ([]byte, error) {
@@ -43,13 +43,29 @@ func init() {
 			InsecureSkipVerify: true,
 		}
 		if listener {
-			return func(c net.Conn) (net.Conn, error) {
-				return dtls.Server(dtlsnet.PacketConnFromConn(c), c.RemoteAddr(), cfg)
-			}, nil
+			return netx.Wrapper{
+				Name:     "dtlspsk",
+				Params:   params,
+				Listener: listener,
+				ListenerToListener: func(l net.Listener) (net.Listener, error) {
+					return dtls.NewListener(dtlsnet.PacketListenerFromListener(l), cfg)
+				},
+				ConnToConn: func(c net.Conn) (net.Conn, error) {
+					return dtls.Server(dtlsnet.PacketConnFromConn(c), c.RemoteAddr(), cfg)
+				}}, nil
 		} else {
-			return func(c net.Conn) (net.Conn, error) {
-				return dtls.Client(dtlsnet.PacketConnFromConn(c), c.RemoteAddr(), cfg)
-			}, nil
+			return netx.Wrapper{
+				Name:     "dtlspsk",
+				Params:   params,
+				Listener: listener,
+				DialerToDialer: func(f func() (net.Conn, error)) (func() (net.Conn, error), error) {
+					return netx.ConnWrapDialer(f, func(c net.Conn) (net.Conn, error) {
+						return dtls.Client(dtlsnet.PacketConnFromConn(c), c.RemoteAddr(), cfg)
+					})
+				},
+				ConnToConn: func(c net.Conn) (net.Conn, error) {
+					return dtls.Client(dtlsnet.PacketConnFromConn(c), c.RemoteAddr(), cfg)
+				}}, nil
 		}
-	}))
+	})
 }

@@ -16,7 +16,7 @@ import (
 )
 
 func init() {
-	netx.Register("dtls", netx.FuncDriver(func(params map[string]string, listener bool) (netx.Wrapper, error) {
+	netx.Register("dtls", func(params map[string]string, listener bool) (netx.Wrapper, error) {
 		var certKey, cert []byte
 		cfg := &dtls.Config{}
 		for key, value := range params {
@@ -25,52 +25,68 @@ func init() {
 				var err error
 				certKey, err = hex.DecodeString(value)
 				if err != nil {
-					return nil, fmt.Errorf("uri: invalid dtls key parameter: %w", err)
+					return netx.Wrapper{}, fmt.Errorf("uri: invalid dtls key parameter: %w", err)
 				}
 			case "cert":
 				var err error
 				cert, err = hex.DecodeString(value)
 				if err != nil {
-					return nil, fmt.Errorf("uri: invalid dtls cert parameter: %w", err)
+					return netx.Wrapper{}, fmt.Errorf("uri: invalid dtls cert parameter: %w", err)
 				}
 			case "servername":
 				cfg.ServerName = value
 			default:
-				return nil, fmt.Errorf("uri: unknown dtls parameter %q", key)
+				return netx.Wrapper{}, fmt.Errorf("uri: unknown dtls parameter %q", key)
 			}
 		}
 		if listener {
 			if cert == nil || certKey == nil {
-				return nil, fmt.Errorf("uri: dtls server requires cert and key parameters")
+				return netx.Wrapper{}, fmt.Errorf("uri: dtls server requires cert and key parameters")
 			}
 			certificate, err := tls.X509KeyPair(cert, certKey)
 			if err != nil {
-				return nil, fmt.Errorf("uri: invalid dtls certificate: %w", err)
+				return netx.Wrapper{}, fmt.Errorf("uri: invalid dtls certificate: %w", err)
 			}
 			cfg.Certificates = []tls.Certificate{certificate}
-			return func(c net.Conn) (net.Conn, error) {
-				return dtls.Server(dtlsnet.PacketConnFromConn(c), c.RemoteAddr(), cfg)
-			}, nil
+			return netx.Wrapper{
+				Name:     "dtls",
+				Params:   params,
+				Listener: listener,
+				ListenerToListener: func(l net.Listener) (net.Listener, error) {
+					return dtls.NewListener(dtlsnet.PacketListenerFromListener(l), cfg)
+				},
+				ConnToConn: func(c net.Conn) (net.Conn, error) {
+					return dtls.Server(dtlsnet.PacketConnFromConn(c), c.RemoteAddr(), cfg)
+				}}, nil
 		} else {
 			if certKey != nil {
-				return nil, fmt.Errorf("uri: dtls client does not support key parameter")
+				return netx.Wrapper{}, fmt.Errorf("uri: dtls client does not support key parameter")
 			}
 			if cert != nil {
 				var err error
 				cfg.InsecureSkipVerify = true
 				cfg.VerifyPeerCertificate, err = spkiVerifier(cert)
 				if err != nil {
-					return nil, fmt.Errorf("uri: invalid dtls cert parameter: %w", err)
+					return netx.Wrapper{}, fmt.Errorf("uri: invalid dtls cert parameter: %w", err)
 				}
 			}
 			if cfg.ServerName == "" && cert == nil {
-				return nil, fmt.Errorf("uri: dtls client requires servername or cert parameter")
+				return netx.Wrapper{}, fmt.Errorf("uri: dtls client requires servername or cert parameter")
 			}
-			return func(c net.Conn) (net.Conn, error) {
-				return dtls.Client(dtlsnet.PacketConnFromConn(c), c.RemoteAddr(), cfg)
-			}, nil
+			return netx.Wrapper{
+				Name:     "dtls",
+				Params:   params,
+				Listener: listener,
+				DialerToDialer: func(f func() (net.Conn, error)) (func() (net.Conn, error), error) {
+					return netx.ConnWrapDialer(f, func(c net.Conn) (net.Conn, error) {
+						return dtls.Client(dtlsnet.PacketConnFromConn(c), c.RemoteAddr(), cfg)
+					})
+				},
+				ConnToConn: func(c net.Conn) (net.Conn, error) {
+					return dtls.Client(dtlsnet.PacketConnFromConn(c), c.RemoteAddr(), cfg)
+				}}, nil
 		}
-	}))
+	})
 }
 
 func spkiVerifier(certPEM []byte) (func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error, error) {

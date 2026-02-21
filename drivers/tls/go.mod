@@ -1,13 +1,12 @@
 module github.com/pedramktb/go-netx/drivers/tls
 
-go 1.25.6
+go 1.25.7
 
-replace github.com/pedramktb/go-netx => ../../
-
-require github.com/pedramktb/go-netx v0.0.0-00010101000000-000000000000
+require github.com/pedramktb/go-netx v1.2.0
 
 require (
 	github.com/pion/transport/v3 v3.1.1 // indirect
-	golang.org/x/net v0.49.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
+	golang.org/x/crypto v0.48.0 // indirect
+	golang.org/x/net v0.50.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
 )

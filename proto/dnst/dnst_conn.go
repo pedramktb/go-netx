@@ -45,7 +45,9 @@ func WithDNSTMaxWritePacket(size uint32) DNSTServerOption {
 }
 
 // NewDNSTServerConn creates a new DNST server connection.
-func NewDNSTServerConn(conn net.Conn, domain string, opts ...DNSTServerOption) netx.CtxConn {
+// See how to use a DNST Tagged Conn:
+// https://github.com/pedramktb/go-netx/blob/main/docs/mux-tag-poll.md
+func NewDNSTServerConn(conn net.Conn, domain string, opts ...DNSTServerOption) netx.TaggedConn {
 	ds := &dnstServerConn{
 		Conn:               conn,
 		encoding:           base32.StdEncoding.WithPadding(base32.NoPadding),
@@ -60,38 +62,34 @@ func NewDNSTServerConn(conn net.Conn, domain string, opts ...DNSTServerOption) n
 	return ds
 }
 
-// ReadCtx reads a packet and returns the associated DNS query context.
-func (c *dnstServerConn) ReadCtx(b []byte) (n int, ctx any, err error) {
+// ReadTagged reads a packet and returns the associated DNS query context.
+func (c *dnstServerConn) ReadTagged(b []byte, tag *any) (n int, err error) {
 	m, err := c.dnsConn.ReadMsg()
 	if err != nil {
-		return 0, nil, err
+		return 0, err
 	}
+	*tag = m
 
 	if len(m.Question) == 0 {
-		return 0, nil, nil
+		return 0, nil
 	}
 	qName := m.Question[0].Name
 	if !strings.HasSuffix(strings.ToLower(qName), c.domain) {
-		return 0, nil, errors.New("invalid domain")
+		return 0, errors.New("invalid domain")
 	}
 	encoded := qName[:len(qName)-len(c.domain)-1]
 
 	data, err := c.encoding.DecodeString(encoded)
 	if err != nil {
-		return 0, nil, err
+		return 0, err
 	}
 
-	return copy(b, data), m, nil
+	return copy(b, data), nil
 }
 
-func (c *dnstServerConn) Read(b []byte) (n int, err error) {
-	n, _, err = c.ReadCtx(b)
-	return n, err
-}
-
-// WriteCtx writes a packet using the provided DNS query context to form a response.
-func (c *dnstServerConn) WriteCtx(b []byte, ctx any) (n int, err error) {
-	reqMsg, ok := ctx.(*dns.Msg)
+// WriteTagged writes a packet using the provided DNS query context to form a response.
+func (c *dnstServerConn) WriteTagged(b []byte, tag any) (n int, err error) {
+	reqMsg, ok := tag.(*dns.Msg)
 	if !ok || reqMsg == nil {
 		return 0, errors.New("invalid context for dnst write")
 	}
@@ -101,11 +99,9 @@ func (c *dnstServerConn) WriteCtx(b []byte, ctx any) (n int, err error) {
 	resp.SetReply(reqMsg)
 	resp.Compress = false
 
-	encoded := c.encoding.EncodeToString(b)
-
 	txt := &dns.TXT{
 		Hdr: dns.RR_Header{Name: reqMsg.Question[0].Name, Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: 0},
-		Txt: []string{encoded},
+		Txt: []string{c.encoding.EncodeToString(b)},
 	}
 	resp.Answer = append(resp.Answer, txt)
 
@@ -113,10 +109,6 @@ func (c *dnstServerConn) WriteCtx(b []byte, ctx any) (n int, err error) {
 		return 0, err
 	}
 	return len(b), nil
-}
-
-func (c *dnstServerConn) Write(b []byte) (n int, err error) {
-	return 0, errors.New("dnst server requires WriteCtx with a valid DNS request")
 }
 
 type dnstClientConn struct {

@@ -14,7 +14,7 @@ import (
 )
 
 func init() {
-	netx.Register("tls", netx.FuncDriver(func(params map[string]string, listener bool) (netx.Wrapper, error) {
+	netx.Register("tls", func(params map[string]string, listener bool) (netx.Wrapper, error) {
 		var certKey, cert []byte
 		cfg := &tls.Config{
 			MinVersion: tls.VersionTLS13,
@@ -26,52 +26,68 @@ func init() {
 				var err error
 				certKey, err = hex.DecodeString(value)
 				if err != nil {
-					return nil, fmt.Errorf("uri: invalid tls key parameter: %w", err)
+					return netx.Wrapper{}, fmt.Errorf("uri: invalid tls key parameter: %w", err)
 				}
 			case "cert":
 				var err error
 				cert, err = hex.DecodeString(value)
 				if err != nil {
-					return nil, fmt.Errorf("uri: invalid tls cert parameter: %w", err)
+					return netx.Wrapper{}, fmt.Errorf("uri: invalid tls cert parameter: %w", err)
 				}
 			case "servername":
 				cfg.ServerName = value
 			default:
-				return nil, fmt.Errorf("uri: unknown tls parameter %q", key)
+				return netx.Wrapper{}, fmt.Errorf("uri: unknown tls parameter %q", key)
 			}
 		}
 		if listener {
 			if cert == nil || certKey == nil {
-				return nil, fmt.Errorf("uri: tls server requires cert and key parameters")
+				return netx.Wrapper{}, fmt.Errorf("uri: tls server requires cert and key parameters")
 			}
 			certificate, err := tls.X509KeyPair(cert, certKey)
 			if err != nil {
-				return nil, fmt.Errorf("uri: invalid tls certificate: %w", err)
+				return netx.Wrapper{}, fmt.Errorf("uri: invalid tls certificate: %w", err)
 			}
 			cfg.Certificates = []tls.Certificate{certificate}
-			return func(c net.Conn) (net.Conn, error) {
-				return tls.Server(c, cfg), nil
-			}, nil
+			return netx.Wrapper{
+				Name:     "tls",
+				Params:   params,
+				Listener: listener,
+				ListenerToListener: func(l net.Listener) (net.Listener, error) {
+					return tls.NewListener(l, cfg), nil
+				},
+				ConnToConn: func(c net.Conn) (net.Conn, error) {
+					return tls.Server(c, cfg), nil
+				}}, nil
 		} else {
 			if certKey != nil {
-				return nil, fmt.Errorf("uri: tls client does not support key parameter")
+				return netx.Wrapper{}, fmt.Errorf("uri: tls client does not support key parameter")
 			}
 			if cert != nil {
 				var err error
 				cfg.InsecureSkipVerify = true
 				cfg.VerifyPeerCertificate, err = spkiVerifier(cert)
 				if err != nil {
-					return nil, fmt.Errorf("uri: invalid tls cert parameter: %w", err)
+					return netx.Wrapper{}, fmt.Errorf("uri: invalid tls cert parameter: %w", err)
 				}
 			}
 			if cfg.ServerName == "" && cert == nil {
-				return nil, fmt.Errorf("uri: tls client requires servername or cert parameter")
+				return netx.Wrapper{}, fmt.Errorf("uri: tls client requires servername or cert parameter")
 			}
-			return func(c net.Conn) (net.Conn, error) {
-				return tls.Client(c, cfg), nil
-			}, nil
+			return netx.Wrapper{
+				Name:     "tls",
+				Params:   params,
+				Listener: listener,
+				DialerToDialer: func(f func() (net.Conn, error)) (func() (net.Conn, error), error) {
+					return netx.ConnWrapDialer(f, func(c net.Conn) (net.Conn, error) {
+						return tls.Client(c, cfg), nil
+					})
+				},
+				ConnToConn: func(c net.Conn) (net.Conn, error) {
+					return tls.Client(c, cfg), nil
+				}}, nil
 		}
-	}))
+	})
 }
 
 func spkiVerifier(certPEM []byte) (func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error, error) {

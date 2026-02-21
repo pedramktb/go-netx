@@ -2,22 +2,10 @@ package netx
 
 import (
 	"fmt"
-	"net"
 	"sync"
 )
 
-type Wrapper func(net.Conn) (net.Conn, error)
-
-type Driver interface {
-	Setup(params map[string]string, listener bool) (Wrapper, error)
-}
-
-// FuncDriver is a helper to create a Driver from a function
-type FuncDriver func(params map[string]string, listener bool) (Wrapper, error)
-
-func (f FuncDriver) Setup(params map[string]string, listener bool) (Wrapper, error) {
-	return f(params, listener)
-}
+type Driver func(params map[string]string, listener bool) (Wrapper, error)
 
 var (
 	driversMu sync.RWMutex

@@ -1,9 +1,3 @@
-/*
-Demux is a simple connection multiplexer that allows multiple virtual connections (sessions)
-Each packet includes a session ID prefix and the payload.
-The session ID is used to route packets to the correct virtual connection.
-*/
-
 package netx
 
 import (
@@ -16,56 +10,22 @@ import (
 	"time"
 )
 
-type demux struct {
-	bc       net.Conn
+type taggedDemux struct {
+	bc       TaggedConn
 	mu       sync.Mutex
 	closing  atomic.Bool
-	sessions map[string]*demuxSess // session ID string to session
+	sessions map[string]*taggedDemuxSess // session ID string to session
 	demuxCore
 }
 
-type demuxCore struct {
-	idMask        int // length of ID prefix in bytes
-	accQueue      chan net.Conn
-	sessQueueSize int
-	bufSize       int
-}
-
-type DemuxOption func(*demuxCore)
-
-// WithAccQueueSize sets the size of the accept queue for new sessions.
-// Default is 0.
-func WithDemuxAccQueueSize(size uint32) DemuxOption {
-	return func(m *demuxCore) {
-		m.accQueue = make(chan net.Conn, size)
-	}
-}
-
-// WithSessQueueSize sets the size of the read and write queues of the sessions.
-// Default is 8.
-func WithDemuxSessQueueSize(size uint32) DemuxOption {
-	return func(m *demuxCore) {
-		m.sessQueueSize = int(size)
-	}
-}
-
-// WithSessionBufSize sets the size of the read and write buffers for each session.
-// This controls how much data is read or written from the underlying connection at once.
-// Default is 4096.
-func WithDemuxBufSize(size uint32) DemuxOption {
-	return func(m *demuxCore) {
-		m.bufSize = int(size)
-	}
-}
-
-// NewDemux creates a new Demux.
+// NewDemuxTagged creates a new Demux with a TaggedConn.
 // Demux implements a simple connection multiplexer that allows multiple virtual connections (sessions)
-// to be multiplexed over a single underlying net.Conn.
+// to be multiplexed over a single underlying TaggedConn.
 // idMask: The length of the session ID prefix in bytes.
-func NewDemux(c net.Conn, idMask int, opts ...DemuxOption) net.Listener {
-	m := &demux{
+func NewTaggedDemux(c TaggedConn, idMask int, opts ...DemuxOption) net.Listener {
+	m := &taggedDemux{
 		bc:       c,
-		sessions: make(map[string]*demuxSess),
+		sessions: make(map[string]*taggedDemuxSess),
 		demuxCore: demuxCore{
 			idMask:        idMask,
 			accQueue:      make(chan net.Conn),
@@ -80,7 +40,7 @@ func NewDemux(c net.Conn, idMask int, opts ...DemuxOption) net.Listener {
 	return m
 }
 
-func (m *demux) Accept() (net.Conn, error) {
+func (m *taggedDemux) Accept() (net.Conn, error) {
 	c, ok := <-m.accQueue
 	if !ok {
 		return nil, net.ErrClosed
@@ -88,7 +48,7 @@ func (m *demux) Accept() (net.Conn, error) {
 	return c, nil
 }
 
-func (m *demux) Close() error {
+func (m *taggedDemux) Close() error {
 	if !m.closing.CompareAndSwap(false, true) {
 		return nil
 	}
@@ -102,31 +62,31 @@ func (m *demux) Close() error {
 	return m.bc.Close()
 }
 
-func (m *demux) readLoop() {
+func (m *taggedDemux) readLoop() {
 	defer m.bc.Close()
 
 	buf := make([]byte, m.bufSize)
+	var tag any
 	for {
-		n, err := m.bc.Read(buf)
+		n, err := m.bc.ReadTagged(buf, &tag)
 		if err != nil {
 			return
 		}
-		// Only copying the read data instead of recreating the buffer can reduce IO allocations by about 50%.
+
 		data := make([]byte, n)
 		copy(data, buf[:n])
-		// Extract session ID from the beginning of the packet
+
 		if len(data) < m.idMask {
-			// Invalid packet, close connection
 			return
 		}
 		id := data[:m.idMask]
 		payload := data[m.idMask:]
 
-		m.processPacket(id, payload, nil)
+		m.processPacket(id, payload, tag)
 	}
 }
 
-func (m *demux) processPacket(id, payload []byte, tag any) {
+func (m *taggedDemux) processPacket(id, payload []byte, tag any) {
 	m.mu.Lock()
 	if m.sessions == nil {
 		m.mu.Unlock()
@@ -134,11 +94,16 @@ func (m *demux) processPacket(id, payload []byte, tag any) {
 	}
 	sess, exists := m.sessions[string(id)]
 	if !exists {
-		sess = &demuxSess{
-			demux:        m,
-			id:           id,
-			rmtAddr:      m.bc.RemoteAddr(),
-			rQueue:       make(chan []byte, m.sessQueueSize),
+		sess = &taggedDemuxSess{
+			demux:   m,
+			id:      id,
+			rmtAddr: m.bc.RemoteAddr(),
+			rQueue: make(chan struct {
+				data []byte
+				tag  any
+			}, m.sessQueueSize),
+			tagQueue:     make(chan any, m.sessQueueSize*2),
+			closed:       make(chan struct{}),
 			readDlNotify: make(chan struct{}),
 		}
 
@@ -151,22 +116,28 @@ func (m *demux) processPacket(id, payload []byte, tag any) {
 		}
 	}
 	select {
-	case sess.rQueue <- payload:
+	case sess.rQueue <- struct {
+		data []byte
+		tag  any
+	}{data: payload, tag: tag}:
 	default:
 		// If the session's read queue is full, drop the packet to avoid blocking the read loop.
 	}
 	m.mu.Unlock()
 }
+func (m *taggedDemux) Addr() net.Addr { return m.bc.LocalAddr() }
 
-func (m *demux) Addr() net.Addr { return m.bc.LocalAddr() }
-
-// demuxSess represents a persistent virtual connection
-type demuxSess struct {
-	demux         *demux
-	id            []byte
-	rmtAddr       net.Addr
-	closing       atomic.Bool
-	rQueue        chan []byte
+type taggedDemuxSess struct {
+	demux   *taggedDemux
+	id      []byte
+	rmtAddr net.Addr
+	closing atomic.Bool
+	rQueue  chan struct {
+		data []byte
+		tag  any
+	}
+	tagQueue      chan any
+	closed        chan struct{}
 	unread        []byte
 	mu            sync.Mutex
 	readDeadline  time.Time
@@ -174,7 +145,7 @@ type demuxSess struct {
 	readDlNotify  chan struct{}
 }
 
-func (s *demuxSess) Read(b []byte) (n int, err error) {
+func (s *taggedDemuxSess) Read(b []byte) (n int, err error) {
 	s.mu.Lock()
 	if len(s.unread) > 0 {
 		n = copy(b, s.unread)
@@ -207,18 +178,23 @@ func (s *demuxSess) Read(b []byte) (n int, err error) {
 		}
 
 		select {
-		case data, ok := <-s.rQueue:
+		case td, ok := <-s.rQueue:
 			if timer != nil {
 				timer.Stop()
 			}
 			if !ok {
 				return 0, io.EOF
 			}
+			select {
+			case s.tagQueue <- td.tag:
+			case <-s.closed:
+				return 0, net.ErrClosed
+			}
 
 			s.mu.Lock()
-			n = copy(b, data)
-			if n < len(data) {
-				s.unread = data[n:]
+			n = copy(b, td.data)
+			if n < len(td.data) {
+				s.unread = td.data[n:]
 			}
 			s.mu.Unlock()
 			return n, nil
@@ -233,12 +209,38 @@ func (s *demuxSess) Read(b []byte) (n int, err error) {
 	}
 }
 
-func (s *demuxSess) Write(b []byte) (n int, err error) {
+func (s *taggedDemuxSess) Write(b []byte) (n int, err error) {
 	s.mu.Lock()
 	deadline := s.writeDeadline
 	s.mu.Unlock()
 
-	if !deadline.IsZero() && time.Now().After(deadline) {
+	var timer *time.Timer
+	var timeoutCh <-chan time.Time
+
+	if !deadline.IsZero() {
+		dur := time.Until(deadline)
+		if dur <= 0 {
+			return 0, os.ErrDeadlineExceeded
+		}
+		timer = time.NewTimer(dur)
+		timeoutCh = timer.C
+	}
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
+
+	var tag any
+	select {
+	case t, ok := <-s.tagQueue:
+		if !ok {
+			return 0, net.ErrClosed
+		}
+		tag = t
+	case <-s.closed:
+		return 0, net.ErrClosed
+	case <-timeoutCh:
 		return 0, os.ErrDeadlineExceeded
 	}
 
@@ -249,7 +251,7 @@ func (s *demuxSess) Write(b []byte) (n int, err error) {
 	// Re-construct payload with ID
 	payload := append(s.id, b...)
 
-	n, err = s.demux.bc.Write(payload)
+	n, err = s.demux.bc.WriteTagged(payload, tag)
 	if err != nil {
 		return 0, err
 	}
@@ -260,30 +262,31 @@ func (s *demuxSess) Write(b []byte) (n int, err error) {
 	return n - len(s.id), nil
 }
 
-func (s *demuxSess) Close() error {
+func (s *taggedDemuxSess) Close() error {
 	if !s.closing.CompareAndSwap(false, true) {
 		return nil
 	}
 	s.demux.mu.Lock()
-	close(s.rQueue)
 	if s.demux.sessions != nil {
+		close(s.rQueue)
 		delete(s.demux.sessions, string(s.id))
 	}
+	close(s.closed)
 	s.demux.mu.Unlock()
 	return nil
 }
 
-func (s *demuxSess) ID() []byte           { return s.id }
-func (s *demuxSess) LocalAddr() net.Addr  { return s.demux.Addr() }
-func (s *demuxSess) RemoteAddr() net.Addr { return s.rmtAddr }
-func (s *demuxSess) SetDeadline(t time.Time) error {
+func (s *taggedDemuxSess) ID() []byte           { return s.id }
+func (s *taggedDemuxSess) LocalAddr() net.Addr  { return s.demux.Addr() }
+func (s *taggedDemuxSess) RemoteAddr() net.Addr { return s.rmtAddr }
+func (s *taggedDemuxSess) SetDeadline(t time.Time) error {
 	if err := s.SetReadDeadline(t); err != nil {
 		return err
 	}
 	return s.SetWriteDeadline(t)
 }
 
-func (s *demuxSess) SetReadDeadline(t time.Time) error {
+func (s *taggedDemuxSess) SetReadDeadline(t time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.readDeadline = t
@@ -294,7 +297,7 @@ func (s *demuxSess) SetReadDeadline(t time.Time) error {
 	return nil
 }
 
-func (s *demuxSess) SetWriteDeadline(t time.Time) error {
+func (s *taggedDemuxSess) SetWriteDeadline(t time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.writeDeadline = t

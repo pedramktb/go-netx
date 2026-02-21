@@ -11,29 +11,8 @@ type ListenerURI struct {
 	URI
 }
 
-type listenerWrapper struct {
-	net.Listener
-	uri *ListenerURI
-}
-
-func (l *listenerWrapper) Accept() (net.Conn, error) {
-	c, err := l.Listener.Accept()
-	if err != nil {
-		return nil, err
-	}
-	return l.uri.Wrap(c)
-}
-
 func (u ListenerURI) Listen(ctx context.Context, opts ...ListenOption) (net.Listener, error) {
-	l, err := Listen(ctx, u.Scheme.Transport.String(), u.Addr, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("error listening on %s://%s: %w", u.Scheme.Transport.String(), u.Addr, err)
-	}
-	l, err = u.Scheme.WrapListener(l)
-	if err != nil {
-		//return nil, fmt.Errorf("error multiplexing listener on %s://%s with %q: %w", u.Scheme.Transport.String(), u.Addr, u.Scheme.TransportLayers.String(), err)
-	}
-	return &listenerWrapper{l, &u}, nil
+	return ListenerScheme{u.Scheme}.Listen(ctx, u.Addr, opts...)
 }
 
 func (u *ListenerURI) UnmarshalText(text []byte) error {
@@ -45,18 +24,7 @@ type DialerURI struct {
 }
 
 func (u DialerURI) Dial(ctx context.Context, opts ...DialOption) (net.Conn, error) {
-	dial := func() (net.Conn, error) {
-		return Dial(ctx, u.Scheme.Transport.String(), u.Addr, opts...)
-	}
-	dial, err := u.Scheme.WrapDialer(dial)
-	if err != nil {
-		//return nil, fmt.Errorf("error multiplexing dialer to %s://%s with %q: %w", u.Scheme.Transport.String(), u.Addr, u.Scheme.TransportLayers.String(), err)
-	}
-	c, err := dial()
-	if err != nil {
-		return nil, fmt.Errorf("error dialing %s://%s: %w", u.Scheme.Transport.String(), u.Addr, err)
-	}
-	return u.Wrap(c)
+	return DialerScheme{u.Scheme}.Dial(ctx, u.Addr, opts...)
 }
 
 func (u *DialerURI) UnmarshalText(text []byte) error {

@@ -1,6 +1,8 @@
 package netx
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -8,6 +10,21 @@ import (
 
 type ListenerScheme struct {
 	Scheme
+}
+
+func (s ListenerScheme) Listen(ctx context.Context, addr string, opts ...ListenOption) (net.Listener, error) {
+	l, err := Listen(ctx, s.Transport.String(), addr, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("error listening on %s://%s: %w", s.Transport.String(), addr, err)
+	}
+	wl, err := s.wrappers.Apply(l)
+	if err != nil {
+		return nil, fmt.Errorf("error upgrading to %s://%s: %w", s.String(), addr, err)
+	}
+	if l, ok := wl.(net.Listener); ok {
+		return l, nil
+	}
+	return nil, fmt.Errorf("error upgrading to %s://%s: %w", s.String(), addr, errors.New("wrapper(s) did not produce net.Listener"))
 }
 
 func (s *ListenerScheme) UnmarshalText(text []byte) error {
@@ -18,23 +35,33 @@ type DialerScheme struct {
 	Scheme
 }
 
+func (c DialerScheme) Dial(ctx context.Context, addr string, opts ...DialOption) (net.Conn, error) {
+	dial := func() (net.Conn, error) {
+		return Dial(ctx, c.Transport.String(), addr, opts...)
+	}
+	wdial, err := c.wrappers.Apply(dial)
+	if err != nil {
+		return nil, fmt.Errorf("error upgrading to %s://%s: %w", c.String(), addr, err)
+	}
+	if dial, ok := wdial.(func() (net.Conn, error)); ok {
+		return dial()
+	}
+	return nil, fmt.Errorf("error upgrading to %s://%s: %w", c.String(), addr, errors.New("wrapper(s) did not produce dial function"))
+}
+
 func (c *DialerScheme) UnmarshalText(text []byte) error {
 	return c.Scheme.UnmarshalText(text, false)
 }
 
 type Scheme struct {
 	Transport
-	Layers
-}
-
-func (s Scheme) Wrap(conn net.Conn) (net.Conn, error) {
-	return s.Layers.Wrap(conn)
+	wrappers Wrappers
 }
 
 func (s Scheme) String() string {
 	str := s.Transport.String()
-	if len(s.Layers) > 0 {
-		str += "+" + s.Layers.String()
+	if len(s.wrappers) > 0 {
+		str += "+" + s.wrappers.String()
 	}
 	return str
 }
@@ -54,5 +81,5 @@ func (s *Scheme) UnmarshalText(text []byte, listener bool) error {
 	if len(parts) == 1 {
 		return nil
 	}
-	return s.Layers.UnmarshalText([]byte(parts[1]), listener)
+	return s.wrappers.UnmarshalText([]byte(parts[1]), listener)
 }

@@ -1,11 +1,11 @@
 package internal
 
 const uriFormat = `URI Format:
-	<transport>+<layer1>[layer1param1key=layer1param1value,layer1param2key=layer1param2value,...]+<layer2>+...://<address>
+	<transport>+<layer1>{layer1param1key=layer1param1value,layer1param2key=layer1param2value,...}+<layer2>+...://<address>
 
 	Examples:
-		tcp+tls[cert=$(cat server.crt | xxd -p),key=$(cat server.key | xxd -p)]://:9000
-		tcp+tls[cert=$(cat client.crt | xxd -p)]+buffered[size=8192]+framed[maxsize=4096]+aesgcm[key=00112233445566778899aabbccddeeff]://example.com:9443
+		tcp+tls{cert=$(cat server.crt | xxd -p),key=$(cat server.key | xxd -p)}://:9000
+		tcp+tls{cert=$(cat client.crt | xxd -p)}+buffered{size=8192}+framed{maxsize=4096}+aesgcm{key=00112233445566778899aabbccddeeff}://example.com:9443
 
 	Supported transports:
 		- tcp: TCP listener or dialer

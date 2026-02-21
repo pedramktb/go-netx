@@ -13,8 +13,8 @@ import (
 )
 
 const tunExample = `	netx tun \
-		--from "tcp+tls[cert=$(cat server.crt | xxd -p),key=$(cat server.key | xxd -p)]://:9000" \
- 		--to "udp+aesgcm[key=00112233445566778899aabbccddeeff]://127.0.0.1:5555"
+		--from "tcp+tls{cert=$(cat server.crt | xxd -p),key=$(cat server.key | xxd -p)}://:9000" \
+ 		--to "udp+aesgcm{key=00112233445566778899aabbccddeeff}://127.0.0.1:5555"
 `
 
 func tun(cancel context.CancelFunc) *cobra.Command {

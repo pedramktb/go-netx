@@ -22,24 +22,35 @@ import (
 )
 
 func init() {
-	Register("framed", FuncDriver(func(params map[string]string, listener bool) (Wrapper, error) {
+	Register("framed", func(params map[string]string, listener bool) (Wrapper, error) {
 		opts := []FramedConnOption{}
 		for key, value := range params {
 			switch key {
 			case "maxsize":
 				maxSize, err := strconv.ParseUint(value, 10, 31)
 				if err != nil {
-					return nil, fmt.Errorf("uri: invalid framed maxsize parameter %q: %w", value, err)
+					return Wrapper{}, fmt.Errorf("uri: invalid framed maxsize parameter %q: %w", value, err)
 				}
 				opts = append(opts, WithMaxFrameSize(uint32(maxSize)))
 			default:
-				return nil, fmt.Errorf("uri: unknown framed parameter %q", key)
+				return Wrapper{}, fmt.Errorf("uri: unknown framed parameter %q", key)
 			}
 		}
-		return func(c net.Conn) (net.Conn, error) {
+		connToConn := func(c net.Conn) (net.Conn, error) {
 			return NewFramedConn(c, opts...), nil
+		}
+		return Wrapper{
+			Name:   "framed",
+			Params: params,
+			ListenerToListener: func(l net.Listener) (net.Listener, error) {
+				return ConnWrapListener(l, connToConn)
+			},
+			DialerToDialer: func(f func() (net.Conn, error)) (func() (net.Conn, error), error) {
+				return ConnWrapDialer(f, connToConn)
+			},
+			ConnToConn: connToConn,
 		}, nil
-	}))
+	})
 }
 
 var ErrFrameTooLarge = errors.New("framedConn: frame too large")

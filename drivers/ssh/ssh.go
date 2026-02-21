@@ -12,7 +12,7 @@ import (
 )
 
 func init() {
-	netx.Register("ssh", netx.FuncDriver(func(params map[string]string, listener bool) (netx.Wrapper, error) {
+	netx.Register("ssh", func(params map[string]string, listener bool) (netx.Wrapper, error) {
 		var pass string
 		var sshkey ssh.Signer // Host key for server, private key for client
 		var pubkey ssh.PublicKey
@@ -23,29 +23,29 @@ func init() {
 			case "key":
 				pemkey, err := hex.DecodeString(value)
 				if err != nil {
-					return nil, fmt.Errorf("uri: invalid ssh key parameter: %w", err)
+					return netx.Wrapper{}, fmt.Errorf("uri: invalid ssh key parameter: %w", err)
 				}
 				sshkey, err = ssh.ParsePrivateKey(pemkey)
 				if err != nil {
-					return nil, fmt.Errorf("uri: invalid ssh private key: %w", err)
+					return netx.Wrapper{}, fmt.Errorf("uri: invalid ssh private key: %w", err)
 				}
 			case "pubkey":
 				azkey, err := hex.DecodeString(value)
 				if err != nil {
-					return nil, fmt.Errorf("uri: invalid ssh pubkey parameter: %w", err)
+					return netx.Wrapper{}, fmt.Errorf("uri: invalid ssh pubkey parameter: %w", err)
 				}
 				pubkey, _, _, _, err = ssh.ParseAuthorizedKey(azkey)
 				if err != nil {
-					return nil, fmt.Errorf("uri: invalid ssh public key: %w", err)
+					return netx.Wrapper{}, fmt.Errorf("uri: invalid ssh public key: %w", err)
 				}
 			default:
-				return nil, fmt.Errorf("uri: unknown ssh parameter %q", key)
+				return netx.Wrapper{}, fmt.Errorf("uri: unknown ssh parameter %q", key)
 			}
 		}
 		if listener {
 			cfg := &ssh.ServerConfig{}
 			if sshkey == nil {
-				return nil, fmt.Errorf("uri: ssh server requires key parameter")
+				return netx.Wrapper{}, fmt.Errorf("uri: ssh server requires key parameter")
 			}
 			cfg.AddHostKey(sshkey)
 			if pubkey != nil {
@@ -65,15 +65,24 @@ func init() {
 				}
 			}
 			if cfg.PublicKeyCallback == nil && cfg.PasswordCallback == nil {
-				return nil, fmt.Errorf("uri: ssh server requires pubkey or pass parameter")
+				return netx.Wrapper{}, fmt.Errorf("uri: ssh server requires pubkey or pass parameter")
 			}
-			return func(c net.Conn) (net.Conn, error) {
-				return sshproto.NewSSHServerConn(c, cfg)
-			}, nil
+			return netx.Wrapper{
+				Name:     "ssh",
+				Params:   params,
+				Listener: listener,
+				ListenerToListener: func(l net.Listener) (net.Listener, error) {
+					return netx.ConnWrapListener(l, func(c net.Conn) (net.Conn, error) {
+						return sshproto.NewSSHServerConn(c, cfg)
+					})
+				},
+				ConnToConn: func(c net.Conn) (net.Conn, error) {
+					return sshproto.NewSSHServerConn(c, cfg)
+				}}, nil
 		} else {
 			cfg := &ssh.ClientConfig{}
 			if pubkey == nil {
-				return nil, fmt.Errorf("uri: ssh client requires pubkey parameter")
+				return netx.Wrapper{}, fmt.Errorf("uri: ssh client requires pubkey parameter")
 			}
 			cfg.HostKeyCallback = func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 				if bytes.Equal(key.Marshal(), pubkey.Marshal()) {
@@ -88,11 +97,20 @@ func init() {
 				cfg.Auth = append(cfg.Auth, ssh.Password(pass))
 			}
 			if len(cfg.Auth) == 0 {
-				return nil, fmt.Errorf("uri: ssh client requires key or pass parameter")
+				return netx.Wrapper{}, fmt.Errorf("uri: ssh client requires key or pass parameter")
 			}
-			return func(c net.Conn) (net.Conn, error) {
-				return sshproto.NewSSHClientConn(c, cfg)
-			}, nil
+			return netx.Wrapper{
+				Name:     "ssh",
+				Params:   params,
+				Listener: listener,
+				DialerToDialer: func(f func() (net.Conn, error)) (func() (net.Conn, error), error) {
+					return netx.ConnWrapDialer(f, func(c net.Conn) (net.Conn, error) {
+						return sshproto.NewSSHClientConn(c, cfg)
+					})
+				},
+				ConnToConn: func(c net.Conn) (net.Conn, error) {
+					return sshproto.NewSSHClientConn(c, cfg)
+				}}, nil
 		}
-	}))
+	})
 }
