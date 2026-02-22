@@ -36,7 +36,7 @@ type Server[ID comparable] struct {
 	routes   atomic.Value
 	routesMu sync.Mutex
 
-	inShutdown atomic.Bool
+	closing atomic.Bool
 
 	mu sync.Mutex
 
@@ -59,7 +59,7 @@ func (s *Server[ID]) Serve(ctx context.Context, listener net.Listener) error {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			if s.shuttingDown() {
+			if s.closing.Load() {
 				return ErrServerClosed
 			}
 			s.Logger.WarnContext(ctx, "error accepting connection", "error", err.Error())
@@ -166,7 +166,7 @@ func (s *Server[ID]) addListener(l net.Listener) bool {
 	if s.listeners == nil {
 		s.listeners = make(map[net.Listener]struct{})
 	}
-	if s.shuttingDown() {
+	if s.closing.Load() {
 		return false
 	}
 	s.listeners[l] = struct{}{}
@@ -182,7 +182,9 @@ func (s *Server[ID]) removeListener(l net.Listener) {
 }
 
 func (s *Server[ID]) Close() error {
-	s.inShutdown.Store(true)
+	if !s.closing.CompareAndSwap(false, true) {
+		return nil
+	}
 
 	// First close listeners under lock
 	s.mu.Lock()
@@ -214,7 +216,9 @@ func (s *Server[ID]) Close() error {
 // finish, Shutdown will force-close remaining connections and return the context error
 // joined with any listener close error.
 func (s *Server[ID]) Shutdown(ctx context.Context) error {
-	s.inShutdown.Store(true)
+	if !s.closing.CompareAndSwap(false, true) {
+		return nil
+	}
 
 	// Close listeners to stop accepting new connections
 	s.mu.Lock()
@@ -254,8 +258,4 @@ func (s *Server[ID]) Shutdown(ctx context.Context) error {
 			// re-check
 		}
 	}
-}
-
-func (s *Server[ID]) shuttingDown() bool {
-	return s.inShutdown.Load()
 }

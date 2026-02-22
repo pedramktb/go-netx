@@ -1,0 +1,17 @@
+go 1.25.7
+
+use (
+	.
+	./cli
+	./proto/aesgcm
+	./proto/dnst
+	./proto/ssh
+	./drivers/aesgcm
+	./drivers/dnst
+	./drivers/dtls
+	./drivers/dtlspsk
+	./drivers/ssh
+	./drivers/tls
+	./drivers/tlspsk
+	./drivers/utls
+)

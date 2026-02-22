@@ -16,7 +16,7 @@ type Tun struct {
 	Conn       net.Conn
 	Peer       net.Conn
 	BufferSize uint // BufferSize for io.Copy, default 32KB
-	inShutdown atomic.Bool
+	closing    atomic.Bool
 }
 
 // Relay copies data between the two connections until
@@ -48,7 +48,7 @@ func (t *Tun) halfCopy(src io.ReadCloser, dst io.WriteCloser, errCh chan<- error
 	}
 	defer t.Close()
 	_, err := io.CopyBuffer(dst, src, buf)
-	if t.shuttingDown() {
+	if t.closing.Load() {
 		errCh <- nil
 		return
 	}
@@ -56,7 +56,9 @@ func (t *Tun) halfCopy(src io.ReadCloser, dst io.WriteCloser, errCh chan<- error
 }
 
 func (t *Tun) Close() error {
-	t.inShutdown.Store(true)
+	if !t.closing.CompareAndSwap(false, true) {
+		return nil
+	}
 	connErr := t.Conn.Close()
 	if errors.Is(connErr, net.ErrClosed) {
 		connErr = nil
@@ -66,10 +68,6 @@ func (t *Tun) Close() error {
 		peerErr = nil
 	}
 	return errors.Join(connErr, peerErr)
-}
-
-func (t *Tun) shuttingDown() bool {
-	return t.inShutdown.Load()
 }
 
 type TunHandler func(ctx context.Context, conn net.Conn) (matched bool, connCtx context.Context, tunnel Tun)

@@ -1,10 +1,53 @@
+/*
+BufferedConn is a network layer that buffers reads and writes, significantly reducing
+the number of syscalls for small IO operations. It wraps a net.Conn with a bufio.Reader
+and bufio.Writer.
+
+This is particularly useful when used with FramedConn, which performs multiple writes
+(header + payload) per frame.
+*/
+
 package netx
 
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"net"
+	"strconv"
 )
+
+func init() {
+	Register("buffered", func(params map[string]string, listener bool) (Wrapper, error) {
+		opts := []BufConnOption{}
+		for key, value := range params {
+			switch key {
+			case "size":
+				size, err := strconv.ParseUint(value, 10, 16)
+				if err != nil {
+					return Wrapper{}, fmt.Errorf("uri: invalid buffered size parameter %q: %w", value, err)
+				}
+				opts = append(opts, WithBufSize(uint16(size)))
+			default:
+				return Wrapper{}, fmt.Errorf("uri: unknown buffered parameter %q", key)
+			}
+		}
+		connToConn := func(c net.Conn) (net.Conn, error) {
+			return NewBufConn(c, opts...), nil
+		}
+		return Wrapper{
+			Name:   "buffered",
+			Params: params,
+			ListenerToListener: func(l net.Listener) (net.Listener, error) {
+				return ConnWrapListener(l, connToConn)
+			},
+			DialerToDialer: func(f Dialer) (Dialer, error) {
+				return ConnWrapDialer(f, connToConn)
+			},
+			ConnToConn: connToConn,
+		}, nil
+	})
+}
 
 type BufConn interface {
 	net.Conn
@@ -19,20 +62,20 @@ type bufConn struct {
 
 type BufConnOption func(*bufConn)
 
-func WithBufSize(size uint32) BufConnOption {
+func WithBufSize(size uint16) BufConnOption {
 	return func(bc *bufConn) {
 		bc.br = bufio.NewReaderSize(bc.Conn, int(size))
 		bc.bw = bufio.NewWriterSize(bc.Conn, int(size))
 	}
 }
 
-func WithBufWriterSize(size uint32) BufConnOption {
+func WithBufWriterSize(size uint16) BufConnOption {
 	return func(bc *bufConn) {
 		bc.bw = bufio.NewWriterSize(bc.Conn, int(size))
 	}
 }
 
-func WithBufReaderSize(size uint32) BufConnOption {
+func WithBufReaderSize(size uint16) BufConnOption {
 	return func(bc *bufConn) {
 		bc.br = bufio.NewReaderSize(bc.Conn, int(size))
 	}

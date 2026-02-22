@@ -14,8 +14,8 @@ import (
 // helper to write a frame to a raw conn
 func writeFrame(t *testing.T, c net.Conn, payload []byte) {
 	t.Helper()
-	var hdr [4]byte
-	binary.BigEndian.PutUint32(hdr[:], uint32(len(payload)))
+	var hdr [2]byte
+	binary.BigEndian.PutUint16(hdr[:], uint16(len(payload)))
 	if _, err := c.Write(hdr[:]); err != nil {
 		t.Fatalf("write hdr: %v", err)
 	}
@@ -158,8 +158,8 @@ func TestFramedConnMaxSize(t *testing.T) {
 		errCh <- err
 	}()
 	time.Sleep(10 * time.Millisecond)
-	var hdr [4]byte
-	binary.BigEndian.PutUint32(hdr[:], uint32(64)) // larger than max 32
+	var hdr [2]byte
+	binary.BigEndian.PutUint16(hdr[:], 64) // larger than max 32
 	if _, err := clientRaw.Write(hdr[:]); err != nil {
 		t.Fatalf("write hdr: %v", err)
 	}
