@@ -29,7 +29,7 @@ func TestDemux_Basic(t *testing.T) {
 
 	go func() {
 		// Use DemuxClient to send data
-		mc, _ := netx.NewDemuxClient(clientConn, sessID)
+		mc, _ := netx.NewDemuxClient(clientConn, sessID)()
 		_, err := mc.Write(payload)
 		if err != nil {
 			t.Errorf("client write error: %v", err)
@@ -97,7 +97,7 @@ func TestDemux_MultipleSessions(t *testing.T) {
 	// Session 1
 	go func() {
 		defer wg.Done()
-		mc, _ := netx.NewDemuxClient(clientConn, []byte("ID01"))
+		mc, _ := netx.NewDemuxClient(clientConn, []byte("ID01"))()
 		mc.Write([]byte("Data1"))
 	}()
 
@@ -105,7 +105,7 @@ func TestDemux_MultipleSessions(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		time.Sleep(10 * time.Millisecond) // Ensure ordering for deterministic accept if possible, though Demux accepts as they come
-		mc, _ := netx.NewDemuxClient(clientConn, []byte("ID02"))
+		mc, _ := netx.NewDemuxClient(clientConn, []byte("ID02"))()
 		mc.Write([]byte("Data2"))
 	}()
 
@@ -188,7 +188,7 @@ func TestDemux_Options(t *testing.T) {
 	// Next read -> "d" -> ID="d..." (too short) -> Invalid packet -> Close connection.
 
 	go func() {
-		mc, _ := netx.NewDemuxClient(clientConn, []byte("1234"))
+		mc, _ := netx.NewDemuxClient(clientConn, []byte("1234"))()
 		mc.Write([]byte("longpayload")) // "1234" + "longpayload" (11 chars) = 15 bytes
 	}()
 
@@ -221,7 +221,7 @@ func TestDemuxSess_WriteTooLarge(t *testing.T) {
 	defer l.Close()
 
 	go func() {
-		mc, _ := netx.NewDemuxClient(clientConn, []byte("1234"))
+		mc, _ := netx.NewDemuxClient(clientConn, []byte("1234"))()
 		mc.Write([]byte("hi"))
 	}()
 
@@ -247,7 +247,7 @@ func TestDemux_Close(t *testing.T) {
 	l := netx.NewDemux(serverConn, 4, netx.WithDemuxAccQueueSize(4))
 
 	go func() {
-		mc, _ := netx.NewDemuxClient(clientConn, []byte("1234"))
+		mc, _ := netx.NewDemuxClient(clientConn, []byte("1234"))()
 		mc.Write([]byte("keepalive"))
 		time.Sleep(100 * time.Millisecond)
 		// Keep sending to keep loop active?
@@ -333,7 +333,7 @@ func TestDemux_DroppedPackets(t *testing.T) {
 	defer l.Close()
 
 	go func() {
-		mc, _ := netx.NewDemuxClient(clientConn, []byte("1234"))
+		mc, _ := netx.NewDemuxClient(clientConn, []byte("1234"))()
 		// Write 4 packets
 		mc.Write([]byte("P1"))
 		mc.Write([]byte("P2"))
@@ -402,7 +402,7 @@ func TestDemuxSess_Deadline(t *testing.T) {
 	defer l.Close()
 
 	go func() {
-		mc, _ := netx.NewDemuxClient(clientConn, []byte("1234"))
+		mc, _ := netx.NewDemuxClient(clientConn, []byte("1234"))()
 		mc.Write([]byte("hi"))
 	}()
 

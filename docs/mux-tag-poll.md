@@ -1,12 +1,13 @@
 # Multiplexing, Tagging & Polling — Architecture Guide
 
-This document describes the **Demux**, **TaggedConn / TaggedDemux**, **DemuxClient**, **PollConn**, and **DNST** modules and how they compose together to build persistent tunneled connections over stateless protocols like DNS.
+This document describes the **Mux / MuxClient**, **Demux**, **TaggedConn / TaggedDemux**, **DemuxClient**, **PollConn**, and **DNST** modules and how they compose together to build persistent tunneled connections over stateless protocols like DNS.
 
 ---
 
 ## Table of Contents
 
 - [Overview](#overview)
+- [Mux & MuxClient](#mux--muxclient)
 - [TaggedConn](#taggedconn)
 - [Demux](#demux)
 - [TaggedDemux](#taggeddemux)
@@ -27,11 +28,57 @@ netx provides a set of composable layers that can be stacked to build tunnels ov
 The answer is a layered architecture:
 
 | Layer | Purpose | Interface |
-|-------|---------|-----------|
-| **DNST** | Encodes data inside DNS queries/responses | `TaggedConn` (server) / `net.Conn` (client) |
+|-------|---------|-----------|| **Mux** | Adapts a `net.Listener` into a single `net.Conn` (server-side) | `net.Conn` |
+| **MuxClient** | Adapts a dial function into a single `net.Conn` (client-side) | `net.Conn` || **DNST** | Encodes data inside DNS queries/responses | `TaggedConn` (server) / `net.Conn` (client) |
 | **TaggedDemux** | Multiplexes sessions over a `TaggedConn`, preserving tags | `net.Listener` |
 | **DemuxClient** | Client-side session framing (prepends/strips session ID) | `net.Conn` |
 | **PollConn** | Converts request-response into persistent bidirectional stream | `net.Conn` |
+
+---
+
+## Mux & MuxClient
+
+**Files:** [mux.go](../mux.go), [mux_client.go](../mux_client.go)
+
+When the actual transport is connection-oriented (e.g. TCP), the server receives a `net.Listener` and the client uses a dial function — but the layers above (DNST, Demux, PollConn, etc.) all expect a single `net.Conn`. These two adapters bridge that gap.
+
+### Mux (server-side)
+
+```go
+func NewMux(ln net.Listener) net.Conn
+```
+
+Wraps a `net.Listener` as a `net.Conn`. Reads accept connections from the listener on demand and transition to the next connection transparently when the current one reaches EOF. Writes are sent to the most recently accepted connection.
+
+This is useful when a wrapper (e.g. a DNS tunnel server) expects a single `net.Conn` but the transport is connection-oriented, where each incoming connection carries one or more request-response exchanges.
+
+### MuxClient (client-side)
+
+```go
+type Dialer func() (net.Conn, error)
+
+func NewMuxClient(dial Dialer, opts ...MuxClientOption) net.Conn
+```
+
+Wraps a dial function as a `net.Conn`. A new connection is obtained by calling the dial function on the first Read/Write and whenever the current connection reaches EOF. This provides the illusion of a single persistent connection over a transport that may use short-lived connections.
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `WithMuxClientLocalAddr` | Address returned by `LocalAddr()` when no connection exists |
+| `WithMuxClientRemoteAddr` | Address returned by `RemoteAddr()` when no connection exists |
+
+### Symmetry
+
+| | Server | Client |
+|--|--------|--------|
+| **Input** | `net.Listener` | `Dialer` |
+| **Output** | `net.Conn` | `net.Conn` |
+| **On EOF** | Accepts next connection | Dials new connection |
+| **Adapter** | `Mux` | `MuxClient` |
+
+Both adapters propagate deadlines to newly established connections and handle close semantics consistently.
 
 ---
 
@@ -121,7 +168,7 @@ This design allows arbitrary layers between the transport and the demux (e.g., e
 `DemuxClient` is the client-side counterpart to `Demux` / `TaggedDemux`. It wraps a `net.Conn` and transparently prepends the session ID on writes and strips it on reads.
 
 ```go
-func NewDemuxClient(c net.Conn, id []byte, opts ...DemuxClientOption) (net.Conn, error)
+func NewDemuxClient(c net.Conn, id []byte, opts ...DemuxClientOption) Dialer
 ```
 
 **Behavior:**
@@ -227,11 +274,14 @@ A complete persistent tunnel over DNS composes the layers as follows:
 ### Server Side
 
 ```
-Transport (UDP/TCP) → DNSTServerConn (TaggedConn) → TaggedDemux (net.Listener) → Accept() sessions
+net.Listener → Mux (net.Conn) → DNSTServerConn (TaggedConn) → TaggedDemux (net.Listener) → Accept() sessions
 ```
 
 ```go
-// Accept a raw connection (e.g., from a UDP/TCP DNS listener)
+// Wrap the TCP/UDP listener into a single net.Conn
+rawConn := netx.NewMux(tcpListener)
+
+// Wrap in DNST (expects a net.Conn)
 serverTagged := dnst.NewDNSTServerConn(rawConn, "tunnel.example.com")
 
 // Demux into sessions (4-byte session ID prefix)
@@ -247,18 +297,21 @@ for {
 ### Client Side
 
 ```
-Transport (UDP/TCP) → DNSTClientConn (net.Conn) → DemuxClient (net.Conn) → PollConn (net.Conn)
+MuxClient (net.Conn) → DNSTClientConn (net.Conn) → DemuxClient (net.Conn) → PollConn (net.Conn)
 ```
 
 ```go
-// Connect to DNS resolver (or directly to tunnel server)
-transport, _ := net.Dial("udp", "8.8.8.8:53")
+// Wrap a dial function into a single net.Conn
+transport := netx.NewMuxClient(func() (net.Conn, error) {
+    return net.Dial("udp", "8.8.8.8:53")
+})
 
 // Wrap in DNST
 dnstConn := dnst.NewDNSTClientConn(transport, "tunnel.example.com")
 
 // Add session framing
-demuxClient, _ := netx.NewDemuxClient(dnstConn, []byte("SES1"))
+demuxDial := netx.NewDemuxClient(dnstConn, []byte("SES1"))
+demuxClient, _ := demuxDial()
 
 // Make it persistent with polling
 persistent := netx.NewPollConn(demuxClient, netx.WithPollInterval(50*time.Millisecond))
@@ -287,6 +340,8 @@ DemuxClient ──── prepends session ID
 DNSTClientConn ──── Base32-encodes into DNS query QNAME
     │ DNS Query: KNSXG5BRGEZSA.tunnel.example.com TXT?
     ▼
+MuxClient ──── dials new connection if needed, forwards write
+    ▼
 Transport (UDP/TCP) ──── sends to resolver / server
 ```
 
@@ -295,6 +350,8 @@ Transport (UDP/TCP) ──── sends to resolver / server
 ```
 Transport (UDP/TCP)
     │ DNS Query arrives
+    ▼
+Mux ──── accepts connection, forwards read
     ▼
 DNSTServerConn ──── parses query, decodes QNAME, tag = *dns.Msg
     │ ReadTagged → data="SES1hello", tag=query
@@ -311,6 +368,8 @@ TaggedDemux session ──── consumes tag, prepends "SES1"
 DNSTServerConn ──── constructs DNS response with TXT record
     │ DNS Response with TXT: Base32("SES1world")
     ▼
+Mux ──── forwards write to current accepted connection
+    ▼
 Transport (UDP/TCP) ──── sends response back
 ```
 
@@ -319,6 +378,8 @@ Transport (UDP/TCP) ──── sends response back
 ```
 Transport (UDP/TCP)
     │ DNS Response arrives
+    ▼
+MuxClient ──── forwards read from current dialled connection
     ▼
 DNSTClientConn ──── parses response, decodes TXT record
     │ Read → "SES1world"
@@ -346,7 +407,11 @@ DemuxClient
 DNSTClientConn
     │ DNS Query: KNSXG5A.tunnel.example.com TXT?
     ▼
+MuxClient ──── dials if needed, sends through current connection
+    ▼
    ... round-trip ...
+    ▼
+MuxClient ──── reads response from current connection
     ▼
 PollConn
     │ Read → server data (if any) or empty response

@@ -16,7 +16,7 @@ a framing layer (e.g., DemuxClient) that adds a header to every write.
 Typical usage with DNS tunneling:
 
 	dnstConn := dnst.NewDNSTClientConn(transport, domain)
-	demuxClient, _ := netx.NewDemuxClient(dnstConn, sessionID)
+	demuxClient, _ := netx.NewDemuxClient(dnstConn, sessionID)()
 	persistent := netx.NewPollConn(demuxClient)
 	// Use persistent as a regular net.Conn
 */

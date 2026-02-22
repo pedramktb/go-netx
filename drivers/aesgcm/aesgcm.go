@@ -48,7 +48,7 @@ func init() {
 			ListenerToListener: func(l net.Listener) (net.Listener, error) {
 				return netx.ConnWrapListener(l, connToConn)
 			},
-			DialerToDialer: func(f func() (net.Conn, error)) (func() (net.Conn, error), error) {
+			DialerToDialer: func(f netx.Dialer) (netx.Dialer, error) {
 				return netx.ConnWrapDialer(f, connToConn)
 			},
 			ConnToConn: connToConn,

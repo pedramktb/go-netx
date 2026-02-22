@@ -43,7 +43,7 @@ func (c DialerScheme) Dial(ctx context.Context, addr string, opts ...DialOption)
 	if err != nil {
 		return nil, fmt.Errorf("error upgrading to %s://%s: %w", c.String(), addr, err)
 	}
-	if dial, ok := wdial.(func() (net.Conn, error)); ok {
+	if dial, ok := wdial.(Dialer); ok {
 		return dial()
 	}
 	return nil, fmt.Errorf("error upgrading to %s://%s: %w", c.String(), addr, errors.New("wrapper(s) did not produce dial function"))

@@ -78,7 +78,7 @@ func init() {
 				Name:     "tls",
 				Params:   params,
 				Listener: listener,
-				DialerToDialer: func(f func() (net.Conn, error)) (func() (net.Conn, error), error) {
+				DialerToDialer: func(f netx.Dialer) (netx.Dialer, error) {
 					return netx.ConnWrapDialer(f, func(c net.Conn) (net.Conn, error) {
 						return tls.Client(c, cfg), nil
 					})

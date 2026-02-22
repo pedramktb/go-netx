@@ -24,19 +24,21 @@ func WithDemuxClientBufSize(size uint32) DemuxClientOption {
 	}
 }
 
-func NewDemuxClient(c net.Conn, id []byte, opts ...DemuxClientOption) (net.Conn, error) {
-	m := &demuxClient{
-		Conn:    c,
-		id:      id,
-		bufSize: 4096,
+func NewDemuxClient(c net.Conn, id []byte, opts ...DemuxClientOption) Dialer {
+	return func() (net.Conn, error) {
+		m := &demuxClient{
+			Conn:    c,
+			id:      id,
+			bufSize: 4096,
+		}
+		if tc, ok := c.(TaggedConn); ok {
+			m.tc = tc
+		}
+		for _, opt := range opts {
+			opt(m)
+		}
+		return m, nil
 	}
-	if tc, ok := c.(TaggedConn); ok {
-		m.tc = tc
-	}
-	for _, opt := range opts {
-		opt(m)
-	}
-	return m, nil
 }
 
 func (m *demuxClient) Write(b []byte) (n int, err error) {

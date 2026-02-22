@@ -1,5 +1,5 @@
 /*
-ListenerConn adapts a net.Listener into a net.Conn by treating every connection accepted
+Mux adapts a net.Listener into a net.Conn by treating every connection accepted
 from the listener as part of a single abstract connection. When a read encounters EOF on
 the current underlying connection, the adapter seamlessly accepts the next one and continues
 reading. Writes are forwarded to the connection that was most recently accepted.
@@ -13,6 +13,7 @@ package netx
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -20,7 +21,33 @@ import (
 	"time"
 )
 
-type listenerConn struct {
+func init() {
+	Register("mux", func(params map[string]string, listener bool) (Wrapper, error) {
+		for key := range params {
+			return Wrapper{}, fmt.Errorf("uri: unknown mux parameter %q", key)
+		}
+		if listener {
+			return Wrapper{
+				Name:     "mux",
+				Params:   params,
+				Listener: true,
+				ListenerToConn: func(ln net.Listener) (net.Conn, error) {
+					return NewMux(ln), nil
+				},
+			}, nil
+		}
+		return Wrapper{
+			Name:     "mux",
+			Params:   params,
+			Listener: false,
+			DialerToConn: func(d Dialer) (net.Conn, error) {
+				return NewMuxClient(d), nil
+			},
+		}, nil
+	})
+}
+
+type mux struct {
 	listener net.Listener
 	closed   atomic.Bool
 
@@ -35,16 +62,16 @@ type listenerConn struct {
 	writeDeadline time.Time
 }
 
-// NewListenerConn wraps a net.Listener as a net.Conn.
+// NewMux wraps a net.Listener as a net.Conn.
 // Reads accept connections from the listener on demand and transition to the next connection
 // transparently when the current one reaches EOF.
 // Writes are sent to the most recently accepted connection.
 // Closing the returned conn closes both the current connection (if any) and the listener.
-func NewListenerConn(ln net.Listener) net.Conn {
-	return &listenerConn{listener: ln}
+func NewMux(ln net.Listener) net.Conn {
+	return &mux{listener: ln}
 }
 
-func (c *listenerConn) Read(b []byte) (int, error) {
+func (c *mux) Read(b []byte) (int, error) {
 	c.rMu.Lock()
 	defer c.rMu.Unlock()
 
@@ -110,7 +137,7 @@ func (c *listenerConn) Read(b []byte) (int, error) {
 	}
 }
 
-func (c *listenerConn) Write(b []byte) (int, error) {
+func (c *mux) Write(b []byte) (int, error) {
 	c.wMu.Lock()
 	defer c.wMu.Unlock()
 
@@ -129,7 +156,7 @@ func (c *listenerConn) Write(b []byte) (int, error) {
 	return conn.Write(b)
 }
 
-func (c *listenerConn) Close() error {
+func (c *mux) Close() error {
 	if !c.closed.CompareAndSwap(false, true) {
 		return nil
 	}
@@ -147,11 +174,11 @@ func (c *listenerConn) Close() error {
 	return errors.Join(errs...)
 }
 
-func (c *listenerConn) LocalAddr() net.Addr {
+func (c *mux) LocalAddr() net.Addr {
 	return c.listener.Addr()
 }
 
-func (c *listenerConn) RemoteAddr() net.Addr {
+func (c *mux) RemoteAddr() net.Addr {
 	c.connMu.RLock()
 	defer c.connMu.RUnlock()
 	if c.current != nil {
@@ -160,7 +187,7 @@ func (c *listenerConn) RemoteAddr() net.Addr {
 	return c.listener.Addr()
 }
 
-func (c *listenerConn) SetDeadline(t time.Time) error {
+func (c *mux) SetDeadline(t time.Time) error {
 	c.deadlineMu.Lock()
 	c.readDeadline = t
 	c.writeDeadline = t
@@ -174,7 +201,7 @@ func (c *listenerConn) SetDeadline(t time.Time) error {
 	return nil
 }
 
-func (c *listenerConn) SetReadDeadline(t time.Time) error {
+func (c *mux) SetReadDeadline(t time.Time) error {
 	c.deadlineMu.Lock()
 	c.readDeadline = t
 	c.deadlineMu.Unlock()
@@ -187,7 +214,7 @@ func (c *listenerConn) SetReadDeadline(t time.Time) error {
 	return nil
 }
 
-func (c *listenerConn) SetWriteDeadline(t time.Time) error {
+func (c *mux) SetWriteDeadline(t time.Time) error {
 	c.deadlineMu.Lock()
 	c.writeDeadline = t
 	c.deadlineMu.Unlock()

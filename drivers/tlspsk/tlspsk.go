@@ -65,7 +65,7 @@ func init() {
 				Name:     "tlspsk",
 				Params:   params,
 				Listener: listener,
-				DialerToDialer: func(f func() (net.Conn, error)) (func() (net.Conn, error), error) {
+				DialerToDialer: func(f netx.Dialer) (netx.Dialer, error) {
 					return netx.ConnWrapDialer(f, func(c net.Conn) (net.Conn, error) {
 						return tlswithpks.Client(c, cfg), nil
 					})

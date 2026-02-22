@@ -58,7 +58,7 @@ func init() {
 				Name:     "dtlspsk",
 				Params:   params,
 				Listener: listener,
-				DialerToDialer: func(f func() (net.Conn, error)) (func() (net.Conn, error), error) {
+				DialerToDialer: func(f netx.Dialer) (netx.Dialer, error) {
 					return netx.ConnWrapDialer(f, func(c net.Conn) (net.Conn, error) {
 						return dtls.Client(dtlsnet.PacketConnFromConn(c), c.RemoteAddr(), cfg)
 					})

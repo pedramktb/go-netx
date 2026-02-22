@@ -22,6 +22,31 @@ func (ls *ClientWrappers) UnmarshalText(text []byte) error {
 	return ls.Wrappers.UnmarshalText(text, false)
 }
 
+// PipeType represents the type flowing through the wrapper pipeline.
+type PipeType int
+
+const (
+	PipeTypeListener   PipeType = iota // net.Listener
+	PipeTypeDialer                     // Dialer
+	PipeTypeConn                       // net.Conn
+	PipeTypeTaggedConn                 // TaggedConn
+)
+
+func (p PipeType) String() string {
+	switch p {
+	case PipeTypeListener:
+		return "Listener"
+	case PipeTypeDialer:
+		return "Dialer"
+	case PipeTypeConn:
+		return "Conn"
+	case PipeTypeTaggedConn:
+		return "TaggedConn"
+	default:
+		return "Unknown"
+	}
+}
+
 type Wrappers []Wrapper
 
 func (ws Wrappers) Apply(conn any) (any, error) {
@@ -56,6 +81,27 @@ func (ws *Wrappers) UnmarshalText(text []byte, server bool) error {
 		}
 	}
 
+	// Validate wrapper chain compatibility
+	currentType := PipeTypeDialer
+	if server {
+		currentType = PipeTypeListener
+	}
+	for i, w := range *ws {
+		outputType, ok := w.OutputFor(currentType)
+		if !ok {
+			return fmt.Errorf("wrapper %q at position %d: incompatible input type %s, expected one of %v", w.String(), i, currentType.String(), w.InputTypes())
+		}
+		currentType = outputType
+	}
+
+	if server && currentType != PipeTypeListener {
+		return fmt.Errorf("invalid wrapper chain: final output type %s is not a Listener for server scheme", currentType.String())
+	}
+
+	if !server && currentType != PipeTypeDialer {
+		return fmt.Errorf("invalid wrapper chain: final output type %s is not a Dialer for client scheme", currentType.String())
+	}
+
 	return nil
 }
 
@@ -86,15 +132,73 @@ type Wrapper struct {
 	ListenerToListener func(net.Listener) (net.Listener, error)
 	ListenerToConn     func(net.Listener) (net.Conn, error)
 
-	DialerToDialer func(func() (net.Conn, error)) (func() (net.Conn, error), error)
-	DialerToConn   func(func() (net.Conn, error)) (net.Conn, error)
+	DialerToDialer func(Dialer) (Dialer, error)
+	DialerToConn   func(Dialer) (net.Conn, error)
 
 	ConnToConn     func(net.Conn) (net.Conn, error)
 	ConnToTagged   func(net.Conn) (TaggedConn, error)
 	ConnToListener func(net.Conn) (net.Listener, error)
+	ConnToDialer   func(net.Conn) (Dialer, error)
 
 	TaggedToTagged   func(TaggedConn) (TaggedConn, error)
 	TaggedToListener func(TaggedConn) (net.Listener, error)
+}
+
+func (w Wrapper) InputTypes() []PipeType {
+	var types []PipeType
+	if w.ListenerToListener != nil || w.ListenerToConn != nil {
+		types = append(types, PipeTypeListener)
+	}
+	if w.DialerToDialer != nil || w.DialerToConn != nil {
+		types = append(types, PipeTypeDialer)
+	}
+	if w.ConnToConn != nil || w.ConnToTagged != nil || w.ConnToListener != nil || w.ConnToDialer != nil {
+		types = append(types, PipeTypeConn)
+	}
+	if w.TaggedToTagged != nil || w.TaggedToListener != nil {
+		types = append(types, PipeTypeTaggedConn)
+	}
+	return types
+}
+
+// OutputFor returns the output PipeType when this wrapper receives the given input type.
+// Returns (outputType, true) if the wrapper supports the input type, or (0, false) otherwise.
+func (w Wrapper) OutputFor(input PipeType) (PipeType, bool) {
+	switch input {
+	case PipeTypeListener:
+		switch {
+		case w.ListenerToListener != nil:
+			return PipeTypeListener, true
+		case w.ListenerToConn != nil:
+			return PipeTypeConn, true
+		}
+	case PipeTypeDialer:
+		switch {
+		case w.DialerToDialer != nil:
+			return PipeTypeDialer, true
+		case w.DialerToConn != nil:
+			return PipeTypeConn, true
+		}
+	case PipeTypeConn:
+		switch {
+		case w.ConnToConn != nil:
+			return PipeTypeConn, true
+		case w.ConnToTagged != nil:
+			return PipeTypeTaggedConn, true
+		case w.ConnToListener != nil:
+			return PipeTypeListener, true
+		case w.ConnToDialer != nil:
+			return PipeTypeDialer, true
+		}
+	case PipeTypeTaggedConn:
+		switch {
+		case w.TaggedToTagged != nil:
+			return PipeTypeTaggedConn, true
+		case w.TaggedToListener != nil:
+			return PipeTypeListener, true
+		}
+	}
+	return 0, false
 }
 
 // Apply transforms the pipeline value through this wrapper.
@@ -109,7 +213,7 @@ func (w Wrapper) Apply(v any) (any, error) {
 		case w.ListenerToConn != nil:
 			return w.ListenerToConn(v)
 		}
-	case func() (net.Conn, error):
+	case Dialer:
 		switch {
 		case w.DialerToDialer != nil:
 			return w.DialerToDialer(v)
@@ -117,20 +221,21 @@ func (w Wrapper) Apply(v any) (any, error) {
 			return w.DialerToConn(v)
 		}
 	case net.Conn:
-		if w.ConnToConn != nil {
+		switch {
+		case w.ConnToConn != nil:
 			return w.ConnToConn(v)
-		}
-		if w.ConnToTagged != nil {
+		case w.ConnToTagged != nil:
 			return w.ConnToTagged(v)
-		}
-		if w.ConnToListener != nil {
+		case w.ConnToListener != nil:
 			return w.ConnToListener(v)
+		case w.ConnToDialer != nil:
+			return w.ConnToDialer(v)
 		}
 	case TaggedConn:
-		if w.TaggedToTagged != nil {
+		switch {
+		case w.TaggedToTagged != nil:
 			return w.TaggedToTagged(v)
-		}
-		if w.TaggedToListener != nil {
+		case w.TaggedToListener != nil:
 			return w.TaggedToListener(v)
 		}
 	}
@@ -212,7 +317,7 @@ func ConnWrapListener(ln net.Listener, wrapConn func(net.Conn) (net.Conn, error)
 }
 
 // ConnWrapDialer adapts a ConnToConn wrapper to a DialerToDialer wrapper.
-func ConnWrapDialer(dial func() (net.Conn, error), wrapConn func(net.Conn) (net.Conn, error)) (func() (net.Conn, error), error) {
+func ConnWrapDialer(dial Dialer, wrapConn func(net.Conn) (net.Conn, error)) (Dialer, error) {
 	return func() (net.Conn, error) {
 		c, err := dial()
 		if err != nil {

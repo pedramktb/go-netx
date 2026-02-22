@@ -56,9 +56,6 @@ func Run(ctx context.Context, cancel context.CancelFunc, opts ...Option) (exitCo
 		Version:       "dev",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
-		},
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			lvl, err := parseLogLevel(logLevel)
 			if err != nil {

@@ -7,14 +7,90 @@ The session ID is used to route packets to the correct virtual connection.
 package netx
 
 import (
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+func init() {
+	Register("demux", func(params map[string]string, listener bool) (Wrapper, error) {
+		var id []byte
+		var bufSize uint32
+		var accQueueSize, sessQueueSize uint32
+		for key, value := range params {
+			switch key {
+			case "id":
+				var err error
+				id, err = hex.DecodeString(value)
+				if err != nil {
+					return Wrapper{}, fmt.Errorf("uri: invalid demux id hex parameter %q: %w", value, err)
+				}
+			case "bufsize":
+				size, err := strconv.ParseUint(value, 10, 32)
+				if err != nil {
+					return Wrapper{}, fmt.Errorf("uri: invalid demux bufsize parameter %q: %w", value, err)
+				}
+				bufSize = uint32(size)
+			case "accqueuesize":
+				size, err := strconv.ParseUint(value, 10, 32)
+				if err != nil {
+					return Wrapper{}, fmt.Errorf("uri: invalid demux accqueuesize parameter %q: %w", value, err)
+				}
+				accQueueSize = uint32(size)
+			case "sessqueuesize":
+				size, err := strconv.ParseUint(value, 10, 32)
+				if err != nil {
+					return Wrapper{}, fmt.Errorf("uri: invalid demux sessqueuesize parameter %q: %w", value, err)
+				}
+				sessQueueSize = uint32(size)
+			default:
+				return Wrapper{}, fmt.Errorf("uri: unknown demux parameter %q", key)
+			}
+		}
+		if listener {
+			var opts []DemuxOption
+			if bufSize > 0 {
+				opts = append(opts, WithDemuxBufSize(bufSize))
+			}
+			if accQueueSize > 0 {
+				opts = append(opts, WithDemuxAccQueueSize(accQueueSize))
+			}
+			if sessQueueSize > 0 {
+				opts = append(opts, WithDemuxSessQueueSize(sessQueueSize))
+			}
+			return Wrapper{
+				Name:     "demux",
+				Params:   params,
+				Listener: true,
+				ConnToListener: func(c net.Conn) (net.Listener, error) {
+					return NewDemux(c, len(id), opts...), nil
+				},
+				TaggedToListener: func(tc TaggedConn) (net.Listener, error) {
+					return NewTaggedDemux(tc, len(id), opts...), nil
+				},
+			}, nil
+		}
+		var clientOpts []DemuxClientOption
+		if bufSize > 0 {
+			clientOpts = append(clientOpts, WithDemuxClientBufSize(bufSize))
+		}
+		return Wrapper{
+			Name:     "demux",
+			Params:   params,
+			Listener: false,
+			ConnToDialer: func(c net.Conn) (Dialer, error) {
+				return NewDemuxClient(c, id, clientOpts...), nil
+			},
+		}, nil
+	})
+}
 
 type demux struct {
 	bc       net.Conn

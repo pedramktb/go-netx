@@ -24,9 +24,9 @@ func tcpListener(t *testing.T) net.Listener {
 	return ln
 }
 
-func TestListenerConn_SingleConnection(t *testing.T) {
+func TestMux_SingleConnection(t *testing.T) {
 	ln := tcpListener(t)
-	lc := netx.NewListenerConn(ln)
+	lc := netx.NewMux(ln)
 	defer lc.Close()
 
 	msg := []byte("hello listener conn")
@@ -53,9 +53,9 @@ func TestListenerConn_SingleConnection(t *testing.T) {
 	}
 }
 
-func TestListenerConn_WriteBack(t *testing.T) {
+func TestMux_WriteBack(t *testing.T) {
 	ln := tcpListener(t)
-	lc := netx.NewListenerConn(ln)
+	lc := netx.NewMux(ln)
 	defer lc.Close()
 
 	request := []byte("ping")
@@ -105,9 +105,9 @@ func TestListenerConn_WriteBack(t *testing.T) {
 	wg.Wait()
 }
 
-func TestListenerConn_MultipleConnections(t *testing.T) {
+func TestMux_MultipleConnections(t *testing.T) {
 	ln := tcpListener(t)
-	lc := netx.NewListenerConn(ln)
+	lc := netx.NewMux(ln)
 	defer lc.Close()
 
 	messages := []string{"first", "second", "third"}
@@ -140,9 +140,9 @@ func TestListenerConn_MultipleConnections(t *testing.T) {
 	}
 }
 
-func TestListenerConn_RequestResponseAcrossConnections(t *testing.T) {
+func TestMux_RequestResponseAcrossConnections(t *testing.T) {
 	ln := tcpListener(t)
-	lc := netx.NewListenerConn(ln)
+	lc := netx.NewMux(ln)
 	defer lc.Close()
 
 	rounds := 3
@@ -197,9 +197,9 @@ func TestListenerConn_RequestResponseAcrossConnections(t *testing.T) {
 	wg.Wait()
 }
 
-func TestListenerConn_Close(t *testing.T) {
+func TestMux_Close(t *testing.T) {
 	ln := tcpListener(t)
-	lc := netx.NewListenerConn(ln)
+	lc := netx.NewMux(ln)
 
 	if err := lc.Close(); err != nil {
 		t.Fatalf("close: %v", err)
@@ -224,9 +224,9 @@ func TestListenerConn_Close(t *testing.T) {
 	}
 }
 
-func TestListenerConn_WriteBeforeRead(t *testing.T) {
+func TestMux_WriteBeforeRead(t *testing.T) {
 	ln := tcpListener(t)
-	lc := netx.NewListenerConn(ln)
+	lc := netx.NewMux(ln)
 	defer lc.Close()
 
 	// Write without a current connection should return an error
@@ -236,9 +236,9 @@ func TestListenerConn_WriteBeforeRead(t *testing.T) {
 	}
 }
 
-func TestListenerConn_LocalAddr(t *testing.T) {
+func TestMux_LocalAddr(t *testing.T) {
 	ln := tcpListener(t)
-	lc := netx.NewListenerConn(ln)
+	lc := netx.NewMux(ln)
 	defer lc.Close()
 
 	if lc.LocalAddr().String() != ln.Addr().String() {
@@ -246,9 +246,9 @@ func TestListenerConn_LocalAddr(t *testing.T) {
 	}
 }
 
-func TestListenerConn_Deadlines(t *testing.T) {
+func TestMux_Deadlines(t *testing.T) {
 	ln := tcpListener(t)
-	lc := netx.NewListenerConn(ln)
+	lc := netx.NewMux(ln)
 	defer lc.Close()
 
 	// Set a very short read deadline before any connection exists
