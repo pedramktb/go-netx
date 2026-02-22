@@ -31,7 +31,7 @@ jobs:
       - run: task test:e2e:tun
       - run: task test:e2e:tun lib=true
       - run: task build
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: ${{ github.sha }}
           path: build/
@@ -52,7 +52,7 @@ jobs:
       - run: task deps
 
       - run: task build:lib:darwin
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: darwin-${{ github.sha }}
           path: build/
