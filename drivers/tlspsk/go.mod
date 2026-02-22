@@ -3,7 +3,7 @@ module github.com/pedramktb/go-netx/drivers/tlspsk
 go 1.25.7
 
 require (
-	github.com/pedramktb/go-netx v1.2.0
+	github.com/pedramktb/go-netx v1.3.0
 	github.com/raff/tls-ext v1.0.0
 	github.com/raff/tls-psk v1.0.0
 )

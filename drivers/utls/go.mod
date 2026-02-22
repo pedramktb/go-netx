@@ -3,7 +3,7 @@ module github.com/pedramktb/go-netx/drivers/utls
 go 1.25.7
 
 require (
-	github.com/pedramktb/go-netx v1.2.0
+	github.com/pedramktb/go-netx v1.3.0
 	github.com/refraction-networking/utls v1.8.2
 )
 

@@ -5,14 +5,13 @@ go 1.25.7
 replace github.com/pedramktb/go-netx/proto/dnst => ../../proto/dnst
 
 require (
-	github.com/pedramktb/go-netx v1.2.0
-	github.com/pedramktb/go-netx/proto/dnst v0.0.0-00010101000000-000000000000
+	github.com/pedramktb/go-netx v1.3.0
+	github.com/pedramktb/go-netx/proto/dnst v0.0.0-20260222183208-e396224258be
 )
 
 require (
 	github.com/miekg/dns v1.1.72 // indirect
 	github.com/pion/transport/v3 v3.1.1 // indirect
-	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/mod v0.33.0 // indirect
 	golang.org/x/net v0.50.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
