@@ -237,6 +237,12 @@ func (c *pollConn) Write(b []byte) (int, error) {
 	select {
 	case <-c.closed:
 		return 0, net.ErrClosed
+	default:
+	}
+
+	select {
+	case <-c.closed:
+		return 0, net.ErrClosed
 	case c.sendCh <- data:
 		return len(b), nil
 	case <-timeoutCh:
