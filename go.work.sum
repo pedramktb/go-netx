@@ -1,4 +1,11 @@
-github.com/pedramktb/go-netx v1.3.0/go.mod h1:zQB+JKix9+Iqj+JbKrEZr7eVSZcHBCtwJXMZojyBWkw=
+github.com/pedramktb/go-netx/drivers/aesgcm v1.0.0/go.mod h1:FtxnR/KNbRQLB/hf8MRU8O9awTZ9Ef0yFhWT9yKBUyA=
+github.com/pedramktb/go-netx/drivers/dnst v1.0.0/go.mod h1:ymcyFaVCGFPNCT+fe+mel8o4sjzLcBAwkOJ/a/84zno=
+github.com/pedramktb/go-netx/drivers/dtls v1.0.0/go.mod h1:brO9SVlJqe5+VoChoizocMAgGffBAzvnYDQ8kW9+RTw=
+github.com/pedramktb/go-netx/drivers/dtlspsk v1.0.0/go.mod h1:8qF5oEm7pN9Ng9za5Tkcp71FutdGnVwSzacl8tJ9OQU=
+github.com/pedramktb/go-netx/drivers/ssh v1.0.0/go.mod h1:+lYryHznzbsmydMIEijnnwpfPKgUvsbT08xzKCFJ5BI=
+github.com/pedramktb/go-netx/drivers/tls v1.0.0/go.mod h1:vsAl/LDD192dCwjAvOpIUzMhvRhZOyey0stD74GslMU=
+github.com/pedramktb/go-netx/drivers/tlspsk v1.0.0/go.mod h1:jNC0F9+7ZkSFD8PXc2vTu1tlNTP+cHtmTW3yZgkVghQ=
+github.com/pedramktb/go-netx/drivers/utls v1.0.0/go.mod h1:UCr9zkwg6WqnkZZqoOJZzSmHHez/MR4QRHvF9bLHz+Q=
 github.com/stretchr/objx v0.5.2/go.mod h1:FRsXN1f5AsAjCGJKqEizvkpNtU+EGNCLh3NxZ/8L+MA=
 github.com/wlynxg/anet v0.0.5/go.mod h1:eay5PRQr7fIVAMbTbchTnO9gG65Hg/uYGdc7mguHxoA=
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
