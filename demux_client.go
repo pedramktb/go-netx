@@ -3,6 +3,7 @@ package netx
 import (
 	"errors"
 	"io"
+	"math"
 	"net"
 )
 
@@ -20,7 +21,10 @@ type DemuxClientOption func(*demuxClient)
 // Default is 4096.
 func WithDemuxClientBufSize(size uint32) DemuxClientOption {
 	return func(c *demuxClient) {
-		c.bufSize = max(0, int(size))
+		c.bufSize = int(size)
+		if c.bufSize <= 0 {
+			c.bufSize = math.MaxInt32
+		}
 	}
 }
 

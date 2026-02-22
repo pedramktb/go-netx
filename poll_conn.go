@@ -24,6 +24,7 @@ package netx
 
 import (
 	"io"
+	"math"
 	"net"
 	"os"
 	"sync"
@@ -67,7 +68,10 @@ func WithPollInterval(d time.Duration) PollConnOption {
 // Default is 4096.
 func WithPollBufSize(size uint32) PollConnOption {
 	return func(c *pollConn) {
-		c.bufSize = max(0, int(size))
+		c.bufSize = int(size)
+		if c.bufSize <= 0 {
+			c.bufSize = math.MaxInt32
+		}
 	}
 }
 

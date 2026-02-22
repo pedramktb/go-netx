@@ -13,6 +13,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"strconv"
 )
@@ -64,20 +65,32 @@ type BufConnOption func(*bufConn)
 
 func WithBufSize(size uint32) BufConnOption {
 	return func(bc *bufConn) {
-		bc.br = bufio.NewReaderSize(bc.Conn, max(0, int(size)))
-		bc.bw = bufio.NewWriterSize(bc.Conn, max(0, int(size)))
+		sz := int(size)
+		if sz <= 0 {
+			sz = math.MaxInt32
+		}
+		bc.br = bufio.NewReaderSize(bc.Conn, sz)
+		bc.bw = bufio.NewWriterSize(bc.Conn, sz)
 	}
 }
 
 func WithBufWriterSize(size uint32) BufConnOption {
 	return func(bc *bufConn) {
-		bc.bw = bufio.NewWriterSize(bc.Conn, max(0, int(size)))
+		sz := int(size)
+		if sz <= 0 {
+			sz = math.MaxInt32
+		}
+		bc.bw = bufio.NewWriterSize(bc.Conn, sz)
 	}
 }
 
 func WithBufReaderSize(size uint32) BufConnOption {
 	return func(bc *bufConn) {
-		bc.br = bufio.NewReaderSize(bc.Conn, max(0, int(size)))
+		sz := int(size)
+		if sz <= 0 {
+			sz = math.MaxInt32
+		}
+		bc.br = bufio.NewReaderSize(bc.Conn, sz)
 	}
 }
 

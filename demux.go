@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"os"
 	"strconv"
@@ -121,7 +122,10 @@ func WithDemuxAccQueueSize(size uint32) DemuxOption {
 // Default is 8.
 func WithDemuxSessQueueSize(size uint32) DemuxOption {
 	return func(m *demuxCore) {
-		m.sessQueueSize = max(0, int(size))
+		m.sessQueueSize = int(size)
+		if m.sessQueueSize < 0 {
+			m.sessQueueSize = math.MaxInt32
+		}
 	}
 }
 
@@ -130,7 +134,10 @@ func WithDemuxSessQueueSize(size uint32) DemuxOption {
 // Default is 4096.
 func WithDemuxBufSize(size uint32) DemuxOption {
 	return func(m *demuxCore) {
-		m.bufSize = max(0, int(size))
+		m.bufSize = int(size)
+		if m.bufSize <= 0 {
+			m.bufSize = math.MaxInt32
+		}
 	}
 }
 

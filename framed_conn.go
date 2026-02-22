@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"strconv"
 	"sync"
@@ -66,7 +67,10 @@ type FramedConnOption func(*framedConn)
 
 func WithMaxFrameSize(size uint32) FramedConnOption {
 	return func(c *framedConn) {
-		c.maxFrameSize = max(0, int(size))
+		c.maxFrameSize = int(size)
+		if c.maxFrameSize <= 0 {
+			c.maxFrameSize = math.MaxInt32
+		}
 	}
 }
 
