@@ -29,7 +29,7 @@ func TestTaggedDemux_Basic(t *testing.T) {
 
 	go func() {
 		// Send with a specific tag
-		clientConn.WriteTagged(packet, expectedReadTag)
+		_, _ = clientConn.WriteTagged(packet, expectedReadTag)
 	}()
 
 	// Accept session
@@ -95,7 +95,7 @@ func TestTaggedDemux_MultipleSessions(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		time.Sleep(10 * time.Millisecond) // partial ordering
-		clientConn.WriteTagged(append(id1, payload1...), nil)
+		_, _ = clientConn.WriteTagged(append(id1, payload1...), nil)
 	}()
 
 	// Session 2
@@ -104,7 +104,7 @@ func TestTaggedDemux_MultipleSessions(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		time.Sleep(20 * time.Millisecond)
-		clientConn.WriteTagged(append(id2, payload2...), nil)
+		_, _ = clientConn.WriteTagged(append(id2, payload2...), nil)
 	}()
 
 	// Accept sessions
@@ -138,7 +138,7 @@ func TestTaggedDemux_MultipleSessions(t *testing.T) {
 			}
 
 			// Echo back
-			c.Write(msg)
+			_, _ = c.Write(msg)
 			_ = myID
 		}(conn)
 		accepted++
@@ -156,7 +156,7 @@ func TestTaggedDemux_MultipleSessions(t *testing.T) {
 	received := make([]byte, 0, expectedTotal)
 
 	// Set a deadline for safety
-	clientConn.SetReadDeadline(time.Now().Add(1 * time.Second))
+	_ = clientConn.SetReadDeadline(time.Now().Add(1 * time.Second))
 
 	for totalRead < expectedTotal {
 		var tag any
@@ -185,7 +185,7 @@ func TestTaggedDemux_Close(t *testing.T) {
 
 	// Create a session
 	go func() {
-		clientConn.WriteTagged([]byte("ID01Payload"), nil)
+		_, _ = clientConn.WriteTagged([]byte("ID01Payload"), nil)
 	}()
 
 	conn, err := l.Accept()
@@ -207,7 +207,7 @@ func TestTaggedDemux_Close(t *testing.T) {
 	}
 
 	// Verify session read returns error (EOF or Closed)
-	conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	_ = conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 	_, err = conn.Read(buf)
 	if err == nil {
 		t.Error("Expected error reading from closed session")

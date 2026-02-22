@@ -194,7 +194,7 @@ func TestMuxClient_WriteTriggersDialOnNoConnection(t *testing.T) {
 		}
 		defer c.Close()
 		// drain
-		io.Copy(io.Discard, c)
+		_, _ = io.Copy(io.Discard, c)
 	}()
 
 	// First write should trigger a dial

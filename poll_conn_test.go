@@ -113,7 +113,7 @@ func TestPollConn_Echo(t *testing.T) {
 	}
 
 	buf := make([]byte, 1024)
-	pc.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = pc.SetReadDeadline(time.Now().Add(2 * time.Second))
 	n, err := pc.Read(buf)
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
@@ -142,7 +142,7 @@ func TestPollConn_ServerInitiated(t *testing.T) {
 
 	// Don't write anything — just read. Polling should pick up server data.
 	buf := make([]byte, 1024)
-	pc.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = pc.SetReadDeadline(time.Now().Add(2 * time.Second))
 	n, err := pc.Read(buf)
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
@@ -169,7 +169,7 @@ func TestPollConn_MultipleMessages(t *testing.T) {
 		}
 
 		buf := make([]byte, 1024)
-		pc.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_ = pc.SetReadDeadline(time.Now().Add(2 * time.Second))
 		n, err := pc.Read(buf)
 		if err != nil {
 			t.Fatalf("Read %d failed: %v", i, err)
@@ -198,7 +198,7 @@ func TestPollConn_Close(t *testing.T) {
 
 	// Read should fail
 	buf := make([]byte, 1024)
-	pc.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	_ = pc.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 	_, err := pc.Read(buf)
 	if err == nil {
 		t.Error("Expected error reading from closed PollConn")
@@ -223,7 +223,7 @@ func TestPollConn_ReadDeadline(t *testing.T) {
 	defer pc.Close()
 
 	buf := make([]byte, 1024)
-	pc.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+	_ = pc.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
 	_, err := pc.Read(buf)
 	if err == nil {
 		t.Error("Expected deadline exceeded error")
@@ -247,7 +247,7 @@ func TestPollConn_ConcurrentReadWrite(t *testing.T) {
 	go func() {
 		buf := make([]byte, 1024)
 		for {
-			pc.SetReadDeadline(time.Now().Add(2 * time.Second))
+			_ = pc.SetReadDeadline(time.Now().Add(2 * time.Second))
 			n, err := pc.Read(buf)
 			if err != nil {
 				return
@@ -301,7 +301,7 @@ func TestPollConn_SmallReadBuffer(t *testing.T) {
 	var result []byte
 	buf := make([]byte, 5)
 	for len(result) < len(msg) {
-		pc.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_ = pc.SetReadDeadline(time.Now().Add(2 * time.Second))
 		n, err := pc.Read(buf)
 		if err != nil {
 			t.Fatalf("Read failed after %d bytes: %v", len(result), err)

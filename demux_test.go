@@ -98,7 +98,7 @@ func TestDemux_MultipleSessions(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		mc, _ := netx.NewDemuxClient(clientConn, []byte("ID01"))()
-		mc.Write([]byte("Data1"))
+		_, _ = mc.Write([]byte("Data1"))
 	}()
 
 	// Session 2
@@ -106,7 +106,7 @@ func TestDemux_MultipleSessions(t *testing.T) {
 		defer wg.Done()
 		time.Sleep(10 * time.Millisecond) // Ensure ordering for deterministic accept if possible, though Demux accepts as they come
 		mc, _ := netx.NewDemuxClient(clientConn, []byte("ID02"))()
-		mc.Write([]byte("Data2"))
+		_, _ = mc.Write([]byte("Data2"))
 	}()
 
 	// Server accepts two sessions
@@ -189,7 +189,7 @@ func TestDemux_Options(t *testing.T) {
 
 	go func() {
 		mc, _ := netx.NewDemuxClient(clientConn, []byte("1234"))()
-		mc.Write([]byte("longpayload")) // "1234" + "longpayload" (11 chars) = 15 bytes
+		_, _ = mc.Write([]byte("longpayload")) // "1234" + "longpayload" (11 chars) = 15 bytes
 	}()
 
 	// We expect Demux to fail or close after first or second packet if it fragments.
@@ -222,7 +222,7 @@ func TestDemuxSess_WriteTooLarge(t *testing.T) {
 
 	go func() {
 		mc, _ := netx.NewDemuxClient(clientConn, []byte("1234"))()
-		mc.Write([]byte("hi"))
+		_, _ = mc.Write([]byte("hi"))
 	}()
 
 	sess, err := l.Accept()
@@ -248,7 +248,7 @@ func TestDemux_Close(t *testing.T) {
 
 	go func() {
 		mc, _ := netx.NewDemuxClient(clientConn, []byte("1234"))()
-		mc.Write([]byte("keepalive"))
+		_, _ = mc.Write([]byte("keepalive"))
 		time.Sleep(100 * time.Millisecond)
 		// Keep sending to keep loop active?
 	}()
@@ -265,10 +265,8 @@ func TestDemux_Close(t *testing.T) {
 	}
 
 	// Check if session is closed
-	_, err = sess.Read(make([]byte, 1))
-	if err != io.EOF && err != net.ErrClosed {
-		// Expect EOF
-	}
+	_, _ = sess.Read(make([]byte, 1))
+	// Note: demux does not currently guarantee EOF/ErrClosed on session reads after Close
 }
 
 func TestDemux_InvalidPacket(t *testing.T) {
@@ -281,7 +279,7 @@ func TestDemux_InvalidPacket(t *testing.T) {
 
 	// Send packet shorter than 4 bytes
 	go func() {
-		clientConn.Write([]byte("123"))
+		_, _ = clientConn.Write([]byte("123"))
 	}()
 
 	// Server readLoop should detect invalid packet and close connection
@@ -335,10 +333,10 @@ func TestDemux_DroppedPackets(t *testing.T) {
 	go func() {
 		mc, _ := netx.NewDemuxClient(clientConn, []byte("1234"))()
 		// Write 4 packets
-		mc.Write([]byte("P1"))
-		mc.Write([]byte("P2"))
-		mc.Write([]byte("P3"))
-		mc.Write([]byte("P4"))
+		_, _ = mc.Write([]byte("P1"))
+		_, _ = mc.Write([]byte("P2"))
+		_, _ = mc.Write([]byte("P3"))
+		_, _ = mc.Write([]byte("P4"))
 	}()
 
 	sess, err := l.Accept()
@@ -364,12 +362,18 @@ func TestDemux_DroppedPackets(t *testing.T) {
 
 	// Read 1
 	n, err := sess.Read(buf)
+	if err != nil {
+		t.Fatalf("Read 1 failed: %v", err)
+	}
 	if string(buf[:n]) != "P1" {
 		t.Errorf("Expected P1, got %s", string(buf[:n]))
 	}
 
 	// Read 2
 	n, err = sess.Read(buf)
+	if err != nil {
+		t.Fatalf("Read 2 failed: %v", err)
+	}
 	if string(buf[:n]) != "P2" {
 		t.Errorf("Expected P2, got %s", string(buf[:n]))
 	}
@@ -403,7 +407,7 @@ func TestDemuxSess_Deadline(t *testing.T) {
 
 	go func() {
 		mc, _ := netx.NewDemuxClient(clientConn, []byte("1234"))()
-		mc.Write([]byte("hi"))
+		_, _ = mc.Write([]byte("hi"))
 	}()
 
 	sess, err := l.Accept()
@@ -413,17 +417,17 @@ func TestDemuxSess_Deadline(t *testing.T) {
 
 	// Read first packet to clear queue
 	buf := make([]byte, 100)
-	sess.Read(buf)
+	_, _ = sess.Read(buf)
 
 	// Set deadline in past
-	sess.SetReadDeadline(time.Now().Add(-1 * time.Second))
+	_ = sess.SetReadDeadline(time.Now().Add(-1 * time.Second))
 	_, err = sess.Read(buf)
 	if err == nil {
 		t.Error("Expected timeout error for past deadline, got nil")
 	}
 
 	// Set short deadline in future
-	sess.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
+	_ = sess.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
 	// Should block until timeout because no data is coming
 	start := time.Now()
 	_, err = sess.Read(buf)

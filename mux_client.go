@@ -101,10 +101,10 @@ func (c *muxClient) ensureConn() (net.Conn, error) {
 	rd, wd := c.readDeadline, c.writeDeadline
 	c.deadlineMu.Unlock()
 	if !rd.IsZero() {
-		newConn.SetReadDeadline(rd)
+		_ = newConn.SetReadDeadline(rd)
 	}
 	if !wd.IsZero() {
-		newConn.SetWriteDeadline(wd)
+		_ = newConn.SetWriteDeadline(wd)
 	}
 
 	c.current = newConn

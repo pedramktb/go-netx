@@ -155,7 +155,7 @@ func (c *taggedPipeConn) Close() error {
 
 func (c *taggedPipeConn) LocalAddr() net.Addr                { return c.localAddr }
 func (c *taggedPipeConn) RemoteAddr() net.Addr               { return c.remoteAddr }
-func (c *taggedPipeConn) SetDeadline(t time.Time) error      { c.SetReadDeadline(t); return nil } // simplified
+func (c *taggedPipeConn) SetDeadline(t time.Time) error      { _ = c.SetReadDeadline(t); return nil } // simplified
 func (c *taggedPipeConn) SetWriteDeadline(t time.Time) error { return nil }
 func (c *taggedPipeConn) SetReadDeadline(t time.Time) error {
 	c.mu.Lock()
