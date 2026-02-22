@@ -80,7 +80,7 @@ _ = bc.Flush() // ensure data is written now
 Notes:
 
 - `NewBufConn` returns a `BufConn` that implements `net.Conn` plus `Flush() error`.
-- Options: `WithBufSize(uint32)` sets both reader and writer size; `WithBufReaderSize(uint32)` and `WithBufWriterSize(uint32)` set them independently. Default: 4096.
+- Options: `WithBufSize(uint16)` sets both reader and writer size; `WithBufReaderSize(uint16)` and `WithBufWriterSize(uint16)` set them independently. Default: 4096.
 - `Close()` will attempt to `Flush()` and close, returning a joined error if any.
 
 ### Framed connections
@@ -157,10 +157,10 @@ Options:
 
 | Option | Default | Purpose |
 |---|---|---|
-| `WithDemuxAccQueueSize(uint32)` | 0 (unbuffered) | Accept queue capacity |
-| `WithDemuxSessQueueSize(uint32)` | 8 | Per-session read queue depth |
-| `WithDemuxBufSize(uint32)` | 4096 | Underlying read buffer size |
-| `WithDemuxClientBufSize(uint32)` | 4096 | Client read/write buffer size |
+| `WithDemuxAccQueueSize(uint16)` | 0 (unbuffered) | Accept queue capacity |
+| `WithDemuxSessQueueSize(uint16)` | 8 | Per-session read queue depth |
+| `WithDemuxBufSize(uint16)` | 4096 | Underlying read buffer size |
+| `WithDemuxClientBufSize(uint16)` | 4096 | Client read/write buffer size |
 
 ### Poll connections
 

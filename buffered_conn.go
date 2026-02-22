@@ -13,7 +13,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"math"
 	"net"
 	"strconv"
 )
@@ -24,11 +23,11 @@ func init() {
 		for key, value := range params {
 			switch key {
 			case "size":
-				size, err := strconv.ParseUint(value, 10, 31)
+				size, err := strconv.ParseUint(value, 10, 16)
 				if err != nil {
 					return Wrapper{}, fmt.Errorf("uri: invalid buffered size parameter %q: %w", value, err)
 				}
-				opts = append(opts, WithBufSize(uint32(size)))
+				opts = append(opts, WithBufSize(uint16(size)))
 			default:
 				return Wrapper{}, fmt.Errorf("uri: unknown buffered parameter %q", key)
 			}
@@ -63,34 +62,22 @@ type bufConn struct {
 
 type BufConnOption func(*bufConn)
 
-func WithBufSize(size uint32) BufConnOption {
+func WithBufSize(size uint16) BufConnOption {
 	return func(bc *bufConn) {
-		sz := int(size)
-		if sz <= 0 {
-			sz = math.MaxInt32
-		}
-		bc.br = bufio.NewReaderSize(bc.Conn, sz)
-		bc.bw = bufio.NewWriterSize(bc.Conn, sz)
+		bc.br = bufio.NewReaderSize(bc.Conn, int(size))
+		bc.bw = bufio.NewWriterSize(bc.Conn, int(size))
 	}
 }
 
-func WithBufWriterSize(size uint32) BufConnOption {
+func WithBufWriterSize(size uint16) BufConnOption {
 	return func(bc *bufConn) {
-		sz := int(size)
-		if sz <= 0 {
-			sz = math.MaxInt32
-		}
-		bc.bw = bufio.NewWriterSize(bc.Conn, sz)
+		bc.bw = bufio.NewWriterSize(bc.Conn, int(size))
 	}
 }
 
-func WithBufReaderSize(size uint32) BufConnOption {
+func WithBufReaderSize(size uint16) BufConnOption {
 	return func(bc *bufConn) {
-		sz := int(size)
-		if sz <= 0 {
-			sz = math.MaxInt32
-		}
-		bc.br = bufio.NewReaderSize(bc.Conn, sz)
+		bc.br = bufio.NewReaderSize(bc.Conn, int(size))
 	}
 }
 

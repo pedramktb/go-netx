@@ -24,7 +24,6 @@ package netx
 
 import (
 	"io"
-	"math"
 	"net"
 	"os"
 	"sync"
@@ -66,19 +65,16 @@ func WithPollInterval(d time.Duration) PollConnOption {
 
 // WithPollBufSize sets the read buffer size for reading responses from the underlying connection.
 // Default is 4096.
-func WithPollBufSize(size uint32) PollConnOption {
+func WithPollBufSize(size uint16) PollConnOption {
 	return func(c *pollConn) {
 		c.bufSize = int(size)
-		if c.bufSize <= 0 {
-			c.bufSize = math.MaxInt32
-		}
 	}
 }
 
 // WithPollSendQueueSize sets the capacity of the send queue.
 // Write calls block when this queue is full, providing natural backpressure.
 // Default is 32.
-func WithPollSendQueueSize(size uint32) PollConnOption {
+func WithPollSendQueueSize(size uint16) PollConnOption {
 	return func(c *pollConn) {
 		c.sendCh = make(chan []byte, size)
 	}
@@ -87,7 +83,7 @@ func WithPollSendQueueSize(size uint32) PollConnOption {
 // WithPollRecvQueueSize sets the capacity of the receive queue.
 // When full, the poll loop blocks until the user reads, providing natural backpressure.
 // Default is 32.
-func WithPollRecvQueueSize(size uint32) PollConnOption {
+func WithPollRecvQueueSize(size uint16) PollConnOption {
 	return func(c *pollConn) {
 		c.recvCh = make(chan []byte, size)
 	}

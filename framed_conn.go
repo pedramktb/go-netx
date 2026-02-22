@@ -16,7 +16,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net"
 	"strconv"
 	"sync"
@@ -28,11 +27,11 @@ func init() {
 		for key, value := range params {
 			switch key {
 			case "maxsize":
-				maxSize, err := strconv.ParseUint(value, 10, 31)
+				maxSize, err := strconv.ParseUint(value, 10, 16)
 				if err != nil {
 					return Wrapper{}, fmt.Errorf("uri: invalid framed maxsize parameter %q: %w", value, err)
 				}
-				opts = append(opts, WithMaxFrameSize(uint32(maxSize)))
+				opts = append(opts, WithMaxFrameSize(uint16(maxSize)))
 			default:
 				return Wrapper{}, fmt.Errorf("uri: unknown framed parameter %q", key)
 			}
@@ -65,12 +64,9 @@ type framedConn struct {
 
 type FramedConnOption func(*framedConn)
 
-func WithMaxFrameSize(size uint32) FramedConnOption {
+func WithMaxFrameSize(size uint16) FramedConnOption {
 	return func(c *framedConn) {
 		c.maxFrameSize = int(size)
-		if c.maxFrameSize <= 0 {
-			c.maxFrameSize = math.MaxInt32
-		}
 	}
 }
 
@@ -100,11 +96,11 @@ func (c *framedConn) Read(p []byte) (int, error) {
 		return n, nil
 	}
 
-	var hdr [4]byte
+	var hdr [2]byte
 	if _, err := io.ReadFull(c.Conn, hdr[:]); err != nil {
 		return 0, err
 	}
-	n := int(binary.BigEndian.Uint32(hdr[:]))
+	n := int(binary.BigEndian.Uint16(hdr[:]))
 	if n > c.maxFrameSize {
 		return 0, ErrFrameTooLarge
 	}
@@ -132,8 +128,8 @@ func (c *framedConn) Write(p []byte) (int, error) {
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
 
-	var hdr [4]byte
-	binary.BigEndian.PutUint32(hdr[:], uint32(len(p)))
+	var hdr [2]byte
+	binary.BigEndian.PutUint16(hdr[:], uint16(len(p)))
 	if _, err := c.Conn.Write(hdr[:]); err != nil {
 		return 0, err
 	}

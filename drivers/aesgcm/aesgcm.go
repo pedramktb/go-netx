@@ -26,11 +26,11 @@ func init() {
 					return netx.Wrapper{}, fmt.Errorf("uri: invalid aesgcm key size %d", len(aeskey))
 				}
 			case "maxpacket":
-				maxPacket, err := strconv.ParseUint(value, 10, 31)
+				maxPacket, err := strconv.ParseUint(value, 10, 16)
 				if err != nil {
 					return netx.Wrapper{}, fmt.Errorf("uri: invalid aesgcm maxpacket parameter %q: %w", value, err)
 				}
-				opts = append(opts, aesgcmproto.WithAESGCMMaxPacket(uint32(maxPacket)))
+				opts = append(opts, aesgcmproto.WithAESGCMMaxPacket(uint16(maxPacket)))
 			default:
 				return netx.Wrapper{}, fmt.Errorf("uri: unknown aesgcm parameter %q", key)
 			}

@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"math"
 	"net"
 	"sync/atomic"
 	"time"
@@ -44,12 +43,9 @@ type AESGCMOption func(*aesgcmConn)
 
 // WithMaxPacket sets the maximum ciphertext packet size accepted on Read.
 // Default is 4KB. This should be >= 8 (seq) + plaintext + aead.Overhead().
-func WithAESGCMMaxPacket(size uint32) AESGCMOption {
+func WithAESGCMMaxPacket(size uint16) AESGCMOption {
 	return func(c *aesgcmConn) {
 		c.maxPacketSize = int(size)
-		if c.maxPacketSize <= 0 {
-			c.maxPacketSize = math.MaxInt32
-		}
 	}
 }
 

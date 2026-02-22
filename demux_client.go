@@ -3,7 +3,6 @@ package netx
 import (
 	"errors"
 	"io"
-	"math"
 	"net"
 )
 
@@ -19,12 +18,9 @@ type DemuxClientOption func(*demuxClient)
 // WithDemuxClientBufSize sets the size of the write buffer for the demux client.
 // This controls how much data is written to the underlying connection at once.
 // Default is 4096.
-func WithDemuxClientBufSize(size uint32) DemuxClientOption {
+func WithDemuxClientBufSize(size uint16) DemuxClientOption {
 	return func(c *demuxClient) {
 		c.bufSize = int(size)
-		if c.bufSize <= 0 {
-			c.bufSize = math.MaxInt32
-		}
 	}
 }
 

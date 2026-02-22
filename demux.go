@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net"
 	"os"
 	"strconv"
@@ -23,8 +22,7 @@ import (
 func init() {
 	Register("demux", func(params map[string]string, listener bool) (Wrapper, error) {
 		var id []byte
-		var bufSize uint32
-		var accQueueSize, sessQueueSize uint32
+		var bufSize, accQueueSize, sessQueueSize uint16
 		for key, value := range params {
 			switch key {
 			case "id":
@@ -34,23 +32,23 @@ func init() {
 					return Wrapper{}, fmt.Errorf("uri: invalid demux id hex parameter %q: %w", value, err)
 				}
 			case "bufsize":
-				size, err := strconv.ParseUint(value, 10, 32)
+				size, err := strconv.ParseUint(value, 10, 16)
 				if err != nil {
 					return Wrapper{}, fmt.Errorf("uri: invalid demux bufsize parameter %q: %w", value, err)
 				}
-				bufSize = uint32(size)
+				bufSize = uint16(size)
 			case "accqueuesize":
-				size, err := strconv.ParseUint(value, 10, 32)
+				size, err := strconv.ParseUint(value, 10, 16)
 				if err != nil {
 					return Wrapper{}, fmt.Errorf("uri: invalid demux accqueuesize parameter %q: %w", value, err)
 				}
-				accQueueSize = uint32(size)
+				accQueueSize = uint16(size)
 			case "sessqueuesize":
-				size, err := strconv.ParseUint(value, 10, 32)
+				size, err := strconv.ParseUint(value, 10, 16)
 				if err != nil {
 					return Wrapper{}, fmt.Errorf("uri: invalid demux sessqueuesize parameter %q: %w", value, err)
 				}
-				sessQueueSize = uint32(size)
+				sessQueueSize = uint16(size)
 			default:
 				return Wrapper{}, fmt.Errorf("uri: unknown demux parameter %q", key)
 			}
@@ -112,7 +110,7 @@ type DemuxOption func(*demuxCore)
 
 // WithAccQueueSize sets the size of the accept queue for new sessions.
 // Default is 0.
-func WithDemuxAccQueueSize(size uint32) DemuxOption {
+func WithDemuxAccQueueSize(size uint16) DemuxOption {
 	return func(m *demuxCore) {
 		m.accQueue = make(chan net.Conn, size)
 	}
@@ -120,24 +118,18 @@ func WithDemuxAccQueueSize(size uint32) DemuxOption {
 
 // WithSessQueueSize sets the size of the read and write queues of the sessions.
 // Default is 8.
-func WithDemuxSessQueueSize(size uint32) DemuxOption {
+func WithDemuxSessQueueSize(size uint16) DemuxOption {
 	return func(m *demuxCore) {
 		m.sessQueueSize = int(size)
-		if m.sessQueueSize < 0 {
-			m.sessQueueSize = math.MaxInt32
-		}
 	}
 }
 
 // WithSessionBufSize sets the size of the read and write buffers for each session.
 // This controls how much data is read or written from the underlying connection at once.
 // Default is 4096.
-func WithDemuxBufSize(size uint32) DemuxOption {
+func WithDemuxBufSize(size uint16) DemuxOption {
 	return func(m *demuxCore) {
 		m.bufSize = int(size)
-		if m.bufSize <= 0 {
-			m.bufSize = math.MaxInt32
-		}
 	}
 }
 
