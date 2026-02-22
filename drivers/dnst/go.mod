@@ -2,11 +2,9 @@ module github.com/pedramktb/go-netx/drivers/dnst
 
 go 1.25.7
 
-replace github.com/pedramktb/go-netx/proto/dnst => ../../proto/dnst
-
 require (
 	github.com/pedramktb/go-netx v1.3.0
-	github.com/pedramktb/go-netx/proto/dnst v0.0.0-20260222183208-e396224258be
+	github.com/pedramktb/go-netx/proto/dnst v1.0.0
 )
 
 require (

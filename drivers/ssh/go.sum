@@ -1,9 +1,9 @@
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/pedramktb/go-netx v1.2.0 h1:knAU/5tg8giCZLsDgycNrV77s+sSvUkPipnsZ12FgiM=
-github.com/pedramktb/go-netx v1.2.0/go.mod h1:SM9iR1nUVJa/Z7KKrsvHEGNPrWulKnqt+IZIW3CD2zo=
 github.com/pedramktb/go-netx v1.3.0 h1:lPTPfw8xUdL7TXHqC1fmn0PGTNvTMe5ijoGzZODDRxA=
 github.com/pedramktb/go-netx v1.3.0/go.mod h1:zQB+JKix9+Iqj+JbKrEZr7eVSZcHBCtwJXMZojyBWkw=
+github.com/pedramktb/go-netx/proto/ssh v1.0.0 h1:pcUtZ3fJo0VDxScb1rEohCimMgQnhuReNzqA9QUGGfk=
+github.com/pedramktb/go-netx/proto/ssh v1.0.0/go.mod h1:hUkqXrKVMNqHugB0m/ZsV2kF7Y2ilu2sn3/sFbyR2HI=
 github.com/pion/transport/v3 v3.1.1 h1:Tr684+fnnKlhPceU+ICdrw6KKkTms+5qHMgw6bIkYOM=
 github.com/pion/transport/v3 v3.1.1/go.mod h1:+c2eewC5WJQHiAA46fkMMzoYZSuGzA/7E2FPrOYHctQ=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

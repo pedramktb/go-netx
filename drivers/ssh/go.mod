@@ -2,11 +2,9 @@ module github.com/pedramktb/go-netx/drivers/ssh
 
 go 1.25.7
 
-replace github.com/pedramktb/go-netx/proto/ssh => ../../proto/ssh
-
 require (
 	github.com/pedramktb/go-netx v1.3.0
-	github.com/pedramktb/go-netx/proto/ssh v0.0.0-20260222183208-e396224258be
+	github.com/pedramktb/go-netx/proto/ssh v1.0.0
 	golang.org/x/crypto v0.48.0
 )
 
