@@ -122,7 +122,7 @@ tasks:
           chmod +x "$ROOT/$WORK/netx_lib"
         {{else}}
           echo "Building netx binary..."
-          go build -o "$WORK/netx" ./cli/cmd
+          go build -o "$WORK/netx" ./cli/cmd/netx
           chmod +x "$WORK/netx"
         {{end}}
 
