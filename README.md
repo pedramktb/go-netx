@@ -361,14 +361,14 @@ If `Logger` is nil, the server/tunnel use `slog.Default()`.
 
 ## CLI
 
-The CLI is available at `cli/cmd` with a `tun` subcommand to relay between chainable endpoints.
+The CLI is available at `cli/cmd/netx` with a `tun` subcommand to relay between chainable endpoints.
 
 ### Quick start
 
 1. Install the CLI.
 
 	 ```bash
-	 go install github.com/pedramktb/go-netx/cli/cmd@latest
+	 go install github.com/pedramktb/go-netx/cli/cmd/netx@latest
 	 ```
 
 2. Compose listener and dialer URIs. Quote them so shells do not mangle the `+`, `{`, or `,` characters.
@@ -384,7 +384,7 @@ The CLI is available at `cli/cmd` with a `tun` subcommand to relay between chain
 ### Install and upgrade
 
 ```bash
-go install github.com/pedramktb/go-netx/cli/cmd@latest
+go install github.com/pedramktb/go-netx/cli/cmd/netx@latest
 ```
 
 ### Build from source
