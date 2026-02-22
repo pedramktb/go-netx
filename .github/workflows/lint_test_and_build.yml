@@ -1,4 +1,4 @@
-name: Lint and Test
+name: Lint, Test and Build
 permissions:
   contents: read
 on:
