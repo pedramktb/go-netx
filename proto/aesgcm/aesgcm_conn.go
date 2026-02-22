@@ -45,7 +45,7 @@ type AESGCMOption func(*aesgcmConn)
 // Default is 4KB. This should be >= 8 (seq) + plaintext + aead.Overhead().
 func WithAESGCMMaxPacket(size uint32) AESGCMOption {
 	return func(c *aesgcmConn) {
-		c.maxPacketSize = int(size)
+		c.maxPacketSize = max(0, int(size))
 	}
 }
 

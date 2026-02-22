@@ -121,7 +121,7 @@ func WithDemuxAccQueueSize(size uint32) DemuxOption {
 // Default is 8.
 func WithDemuxSessQueueSize(size uint32) DemuxOption {
 	return func(m *demuxCore) {
-		m.sessQueueSize = int(size)
+		m.sessQueueSize = max(0, int(size))
 	}
 }
 
@@ -130,7 +130,7 @@ func WithDemuxSessQueueSize(size uint32) DemuxOption {
 // Default is 4096.
 func WithDemuxBufSize(size uint32) DemuxOption {
 	return func(m *demuxCore) {
-		m.bufSize = int(size)
+		m.bufSize = max(0, int(size))
 	}
 }
 

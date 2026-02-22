@@ -66,7 +66,7 @@ type FramedConnOption func(*framedConn)
 
 func WithMaxFrameSize(size uint32) FramedConnOption {
 	return func(c *framedConn) {
-		c.maxFrameSize = int(size)
+		c.maxFrameSize = max(0, int(size))
 	}
 }
 

@@ -67,7 +67,7 @@ func WithPollInterval(d time.Duration) PollConnOption {
 // Default is 4096.
 func WithPollBufSize(size uint32) PollConnOption {
 	return func(c *pollConn) {
-		c.bufSize = int(size)
+		c.bufSize = max(0, int(size))
 	}
 }
 

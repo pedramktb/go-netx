@@ -20,7 +20,7 @@ type DemuxClientOption func(*demuxClient)
 // Default is 4096.
 func WithDemuxClientBufSize(size uint32) DemuxClientOption {
 	return func(c *demuxClient) {
-		c.bufSize = int(size)
+		c.bufSize = max(0, int(size))
 	}
 }
 

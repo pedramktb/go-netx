@@ -38,7 +38,7 @@ type DNSTServerOption func(*dnstServerConn)
 
 // WithDNSTMaxWritePacket sets the maximum ciphertext packet size accepted on write.
 // Default is 765 bytes, which given a 255 byte QNAME is the maximum based on a UDP transport with an MTU of 1500.
-func WithDNSTMaxWritePacket(size uint32) DNSTServerOption {
+func WithDNSTMaxWritePacket(size int16) DNSTServerOption {
 	return func(c *dnstServerConn) {
 		c.maxWritePacketSize = int(size)
 	}
@@ -138,7 +138,7 @@ type DNSTClientOption func(*dnstClientConn)
 
 // WithDNSTMaxReadPacket sets the maximum ciphertext packet size accepted on Read.
 // Default is 765 bytes, which given a 255 byte QNAME is the maximum based on a UDP transport with an MTU of 1500.
-func WithDNSTMaxReadPacket(size uint32) DNSTClientOption {
+func WithDNSTMaxReadPacket(size uint16) DNSTClientOption {
 	return func(c *dnstClientConn) {
 		c.maxReadPacketSize = int(size)
 	}
