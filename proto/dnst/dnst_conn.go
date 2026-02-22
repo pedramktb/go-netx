@@ -20,18 +20,18 @@ import (
 	"errors"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/miekg/dns"
 	"github.com/pedramktb/go-netx"
 )
 
 type dnstServerConn struct {
-	net.Conn
+	conn               net.Conn
 	encoding           *base32.Encoding
 	domain             string
 	maxReadPacketSize  int
 	maxWritePacketSize int
-	dnsConn            *dns.Conn
 }
 
 type DNSTServerOption func(*dnstServerConn)
@@ -49,12 +49,11 @@ func WithDNSTMaxWritePacket(size uint32) DNSTServerOption {
 // https://github.com/pedramktb/go-netx/blob/main/docs/mux-tag-poll.md
 func NewDNSTServerConn(conn net.Conn, domain string, opts ...DNSTServerOption) netx.TaggedConn {
 	ds := &dnstServerConn{
-		Conn:               conn,
+		conn:               conn,
 		encoding:           base32.StdEncoding.WithPadding(base32.NoPadding),
 		domain:             strings.TrimSuffix(domain, ".") + ".",
 		maxReadPacketSize:  512,
 		maxWritePacketSize: 765,
-		dnsConn:            &dns.Conn{Conn: conn},
 	}
 	for _, opt := range opts {
 		opt(ds)
@@ -64,8 +63,13 @@ func NewDNSTServerConn(conn net.Conn, domain string, opts ...DNSTServerOption) n
 
 // ReadTagged reads a packet and returns the associated DNS query context.
 func (c *dnstServerConn) ReadTagged(b []byte, tag *any) (n int, err error) {
-	m, err := c.dnsConn.ReadMsg()
+	buf := make([]byte, c.maxReadPacketSize)
+	n, err = c.conn.Read(buf)
 	if err != nil {
+		return 0, err
+	}
+	m := new(dns.Msg)
+	if err := m.Unpack(buf[:n]); err != nil {
 		return 0, err
 	}
 	*tag = m
@@ -105,11 +109,22 @@ func (c *dnstServerConn) WriteTagged(b []byte, tag any) (n int, err error) {
 	}
 	resp.Answer = append(resp.Answer, txt)
 
-	if err := c.dnsConn.WriteMsg(resp); err != nil {
+	out, err := resp.Pack()
+	if err != nil {
+		return 0, err
+	}
+	if _, err := c.conn.Write(out); err != nil {
 		return 0, err
 	}
 	return len(b), nil
 }
+
+func (c *dnstServerConn) Close() error                       { return c.conn.Close() }
+func (c *dnstServerConn) LocalAddr() net.Addr                { return c.conn.LocalAddr() }
+func (c *dnstServerConn) RemoteAddr() net.Addr               { return c.conn.RemoteAddr() }
+func (c *dnstServerConn) SetDeadline(t time.Time) error      { return c.conn.SetDeadline(t) }
+func (c *dnstServerConn) SetReadDeadline(t time.Time) error  { return c.conn.SetReadDeadline(t) }
+func (c *dnstServerConn) SetWriteDeadline(t time.Time) error { return c.conn.SetWriteDeadline(t) }
 
 type dnstClientConn struct {
 	net.Conn
@@ -117,7 +132,6 @@ type dnstClientConn struct {
 	domain             string
 	maxReadPacketSize  int
 	maxWritePacketSize int
-	dnsConn            *dns.Conn
 }
 
 type DNSTClientOption func(*dnstClientConn)
@@ -139,7 +153,6 @@ func NewDNSTClientConn(conn net.Conn, domain string, opts ...DNSTClientOption) n
 		domain:             strings.TrimSuffix(domain, "."),
 		maxReadPacketSize:  765,
 		maxWritePacketSize: 255 - len(domain) - 4, // -4 for periods added in encoding
-		dnsConn:            &dns.Conn{Conn: conn},
 	}
 	for _, opt := range opts {
 		opt(dt)
@@ -159,16 +172,24 @@ func (c *dnstClientConn) Write(b []byte) (n int, err error) {
 	m.Id = dns.Id()
 	m.RecursionDesired = true
 
-	// Sending the query
-	if err := c.dnsConn.WriteMsg(m); err != nil {
+	out, err := m.Pack()
+	if err != nil {
+		return 0, err
+	}
+	if _, err := c.Conn.Write(out); err != nil {
 		return 0, err
 	}
 	return len(b), nil
 }
 
 func (c *dnstClientConn) Read(b []byte) (n int, err error) {
-	m, err := c.dnsConn.ReadMsg()
+	buf := make([]byte, c.maxReadPacketSize)
+	n, err = c.Conn.Read(buf)
 	if err != nil {
+		return 0, err
+	}
+	m := new(dns.Msg)
+	if err := m.Unpack(buf[:n]); err != nil {
 		return 0, err
 	}
 	if len(m.Answer) == 0 {
