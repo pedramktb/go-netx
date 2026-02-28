@@ -303,12 +303,12 @@ func (l *connWrappedListener) Accept() (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	c, err = l.wrapConn(c)
+	wc, err := l.wrapConn(c)
 	if err != nil {
 		c.Close()
 		return nil, err
 	}
-	return c, nil
+	return wc, nil
 }
 
 // ConnWrapListener adapts a ConnToConn wrapper to a ListenerToListener wrapper.
@@ -323,11 +323,11 @@ func ConnWrapDialer(dial Dialer, wrapConn func(net.Conn) (net.Conn, error)) (Dia
 		if err != nil {
 			return nil, err
 		}
-		c, err = wrapConn(c)
+		wc, err := wrapConn(c)
 		if err != nil {
 			c.Close()
 			return nil, err
 		}
-		return c, nil
+		return wc, nil
 	}, nil
 }

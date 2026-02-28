@@ -32,7 +32,7 @@ func NewTaggedDemux(c TaggedConn, idMask uint8, opts ...DemuxOption) (net.Listen
 			sessQueueSize: 8,
 		},
 	}
-	if mw, ok := c.(interface{ MaxWrite() uint16 }); ok && mw.MaxWrite() == 0 {
+	if mw, ok := c.(interface{ MaxWrite() uint16 }); ok && mw.MaxWrite() != 0 {
 		if mw.MaxWrite() <= uint16(idMask) {
 			return nil, errors.New("demux: underlying connection's MaxWrite is too small for ID")
 		}

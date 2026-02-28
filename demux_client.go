@@ -26,7 +26,7 @@ func NewDemuxClient(c net.Conn, id []byte) Dialer {
 				},
 			},
 		}
-		if mw, ok := c.(interface{ MaxWrite() uint16 }); ok {
+		if mw, ok := c.(interface{ MaxWrite() uint16 }); ok && mw.MaxWrite() != 0 {
 			if mw.MaxWrite() <= uint16(len(id)) {
 				return nil, errors.New("demuxClient: underlying connection's MaxWrite is too small for ID")
 			}
