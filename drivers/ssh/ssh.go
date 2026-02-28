@@ -29,10 +29,10 @@ func init() {
 				if err != nil {
 					return netx.Wrapper{}, fmt.Errorf("uri: invalid ssh private key: %w", err)
 				}
-			case "pubkey":
+			case "pub":
 				azkey, err := hex.DecodeString(value)
 				if err != nil {
-					return netx.Wrapper{}, fmt.Errorf("uri: invalid ssh pubkey parameter: %w", err)
+					return netx.Wrapper{}, fmt.Errorf("uri: invalid ssh public key parameter: %w", err)
 				}
 				pubkey, _, _, _, err = ssh.ParseAuthorizedKey(azkey)
 				if err != nil {
@@ -73,11 +73,11 @@ func init() {
 				Listener: listener,
 				ListenerToListener: func(l net.Listener) (net.Listener, error) {
 					return netx.ConnWrapListener(l, func(c net.Conn) (net.Conn, error) {
-						return sshproto.NewSSHServerConn(c, cfg)
+						return sshproto.NewServerConn(c, cfg)
 					})
 				},
 				ConnToConn: func(c net.Conn) (net.Conn, error) {
-					return sshproto.NewSSHServerConn(c, cfg)
+					return sshproto.NewServerConn(c, cfg)
 				}}, nil
 		} else {
 			cfg := &ssh.ClientConfig{}
@@ -105,11 +105,11 @@ func init() {
 				Listener: listener,
 				DialerToDialer: func(f netx.Dialer) (netx.Dialer, error) {
 					return netx.ConnWrapDialer(f, func(c net.Conn) (net.Conn, error) {
-						return sshproto.NewSSHClientConn(c, cfg)
+						return sshproto.NewClientConn(c, cfg)
 					})
 				},
 				ConnToConn: func(c net.Conn) (net.Conn, error) {
-					return sshproto.NewSSHClientConn(c, cfg)
+					return sshproto.NewClientConn(c, cfg)
 				}}, nil
 		}
 	})
