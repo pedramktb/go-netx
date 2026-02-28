@@ -1,9 +1,9 @@
 /*
-BufferedConn is a network layer that buffers reads and writes, significantly reducing
+BufConn is a network layer that buffers reads and writes, significantly reducing
 the number of syscalls for small IO operations. It wraps a net.Conn with a bufio.Reader
 and bufio.Writer.
 
-This is particularly useful when used with FramedConn, which performs multiple writes
+This is particularly useful when used with FrameConn, which performs multiple writes
 (header + payload) per frame.
 */
 
@@ -18,25 +18,37 @@ import (
 )
 
 func init() {
-	Register("buffered", func(params map[string]string, listener bool) (Wrapper, error) {
+	Register("buf", func(params map[string]string, listener bool) (Wrapper, error) {
 		opts := []BufConnOption{}
 		for key, value := range params {
 			switch key {
-			case "size":
+			case "rw":
 				size, err := strconv.ParseUint(value, 10, 16)
 				if err != nil {
-					return Wrapper{}, fmt.Errorf("uri: invalid buffered size parameter %q: %w", value, err)
+					return Wrapper{}, fmt.Errorf("buf: invalid read/write size parameter %q: %w", value, err)
 				}
-				opts = append(opts, WithBufSize(uint16(size)))
+				opts = append(opts, WithBufRead(uint16(size)), WithBufWrite(uint16(size)))
+			case "r":
+				size, err := strconv.ParseUint(value, 10, 16)
+				if err != nil {
+					return Wrapper{}, fmt.Errorf("buf: invalid read size parameter %q: %w", value, err)
+				}
+				opts = append(opts, WithBufRead(uint16(size)))
+			case "w":
+				size, err := strconv.ParseUint(value, 10, 16)
+				if err != nil {
+					return Wrapper{}, fmt.Errorf("buf: invalid write size parameter %q: %w", value, err)
+				}
+				opts = append(opts, WithBufWrite(uint16(size)))
 			default:
-				return Wrapper{}, fmt.Errorf("uri: unknown buffered parameter %q", key)
+				return Wrapper{}, fmt.Errorf("buf: unknown buffered parameter %q", key)
 			}
 		}
 		connToConn := func(c net.Conn) (net.Conn, error) {
 			return NewBufConn(c, opts...), nil
 		}
 		return Wrapper{
-			Name:   "buffered",
+			Name:   "buf",
 			Params: params,
 			ListenerToListener: func(l net.Listener) (net.Listener, error) {
 				return ConnWrapListener(l, connToConn)
@@ -62,20 +74,13 @@ type bufConn struct {
 
 type BufConnOption func(*bufConn)
 
-func WithBufSize(size uint16) BufConnOption {
-	return func(bc *bufConn) {
-		bc.br = bufio.NewReaderSize(bc.Conn, int(size))
-		bc.bw = bufio.NewWriterSize(bc.Conn, int(size))
-	}
-}
-
-func WithBufWriterSize(size uint16) BufConnOption {
+func WithBufWrite(size uint16) BufConnOption {
 	return func(bc *bufConn) {
 		bc.bw = bufio.NewWriterSize(bc.Conn, int(size))
 	}
 }
 
-func WithBufReaderSize(size uint16) BufConnOption {
+func WithBufRead(size uint16) BufConnOption {
 	return func(bc *bufConn) {
 		bc.br = bufio.NewReaderSize(bc.Conn, int(size))
 	}
