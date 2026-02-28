@@ -13,13 +13,16 @@ func TestDNST_TaggedDemux_SingleSession(t *testing.T) {
 	p1, p2 := net.Pipe()
 
 	domain := "example.com"
-	idLen := 4
+	idLen := uint8(4)
 
-	serverTagged := NewDNSTServerConn(p1, domain)
-	l := netx.NewTaggedDemux(serverTagged, idLen)
+	serverTagged := NewServerConn(p1, domain)
+	l, err := netx.NewTaggedDemux(serverTagged, idLen)
+	if err != nil {
+		t.Fatalf("Failed to create TaggedDemux: %v", err)
+	}
 	defer l.Close()
 
-	clientDNST := NewDNSTClientConn(p2, domain)
+	clientDNST := NewClientConn(p2, domain)
 	defer p2.Close()
 
 	client, err := netx.NewDemuxClient(clientDNST, []byte("AAA1"))()
@@ -73,13 +76,16 @@ func TestDNST_TaggedDemux_MultipleSessions(t *testing.T) {
 	p1, p2 := net.Pipe()
 
 	domain := "example.com"
-	idLen := 4
+	idLen := uint8(4)
 
-	serverTagged := NewDNSTServerConn(p1, domain)
-	l := netx.NewTaggedDemux(serverTagged, idLen, netx.WithDemuxAccQueueSize(4))
+	serverTagged := NewServerConn(p1, domain)
+	l, err := netx.NewTaggedDemux(serverTagged, idLen, netx.WithDemuxAccQueue(4))
+	if err != nil {
+		t.Fatalf("Failed to create TaggedDemux: %v", err)
+	}
 	defer l.Close()
 
-	clientDNST := NewDNSTClientConn(p2, domain)
+	clientDNST := NewClientConn(p2, domain)
 	defer p2.Close()
 
 	type session struct {
@@ -141,13 +147,16 @@ func TestDNST_TaggedDemux_MultipleMessages(t *testing.T) {
 	p1, p2 := net.Pipe()
 
 	domain := "example.com"
-	idLen := 4
+	idLen := uint8(4)
 
-	serverTagged := NewDNSTServerConn(p1, domain)
-	l := netx.NewTaggedDemux(serverTagged, idLen)
+	serverTagged := NewServerConn(p1, domain)
+	l, err := netx.NewTaggedDemux(serverTagged, idLen)
+	if err != nil {
+		t.Fatalf("Failed to create TaggedDemux: %v", err)
+	}
 	defer l.Close()
 
-	clientDNST := NewDNSTClientConn(p2, domain)
+	clientDNST := NewClientConn(p2, domain)
 	defer p2.Close()
 
 	client, err := netx.NewDemuxClient(clientDNST, []byte("SESS"))()
@@ -219,13 +228,16 @@ func TestDNST_TaggedDemux_Close(t *testing.T) {
 	p1, p2 := net.Pipe()
 
 	domain := "example.com"
-	idLen := 4
+	idLen := uint8(4)
 
-	serverTagged := NewDNSTServerConn(p1, domain)
-	l := netx.NewTaggedDemux(serverTagged, idLen)
+	serverTagged := NewServerConn(p1, domain)
+	l, err := netx.NewTaggedDemux(serverTagged, idLen)
+	if err != nil {
+		t.Fatalf("Failed to create TaggedDemux: %v", err)
+	}
 
 	// Create a session via DemuxClient
-	clientDNST := NewDNSTClientConn(p2, domain)
+	clientDNST := NewClientConn(p2, domain)
 	client, err := netx.NewDemuxClient(clientDNST, []byte("SID1"))()
 	if err != nil {
 		t.Fatalf("NewDemuxClient failed: %v", err)
@@ -279,7 +291,7 @@ func TestDNST_TaggedDemux_TCP(t *testing.T) {
 	defer tcpListener.Close()
 
 	domain := "example.com"
-	idLen := 4
+	idLen := uint8(4)
 
 	errCh := make(chan error, 1)
 
@@ -292,8 +304,8 @@ func TestDNST_TaggedDemux_TCP(t *testing.T) {
 		}
 		defer tcpConn.Close()
 
-		serverTagged := NewDNSTServerConn(tcpConn, domain)
-		demux := netx.NewTaggedDemux(serverTagged, idLen)
+		serverTagged := NewServerConn(tcpConn, domain)
+		demux, _ := netx.NewTaggedDemux(serverTagged, idLen)
 		defer demux.Close()
 
 		sess, err := demux.Accept()
@@ -325,7 +337,7 @@ func TestDNST_TaggedDemux_TCP(t *testing.T) {
 	}
 	defer tcpConn.Close()
 
-	clientDNST := NewDNSTClientConn(tcpConn, domain)
+	clientDNST := NewClientConn(tcpConn, domain)
 	client, err := netx.NewDemuxClient(clientDNST, []byte("TST1"))()
 	if err != nil {
 		t.Fatalf("NewDemuxClient failed: %v", err)
@@ -362,10 +374,13 @@ func TestDNST_TaggedDemux_PollConn_Echo(t *testing.T) {
 	p1, p2 := net.Pipe()
 
 	domain := "example.com"
-	idLen := 4
+	idLen := uint8(4)
 
-	serverTagged := NewDNSTServerConn(p1, domain)
-	l := netx.NewTaggedDemux(serverTagged, idLen, netx.WithDemuxAccQueueSize(1))
+	serverTagged := NewServerConn(p1, domain)
+	l, err := netx.NewTaggedDemux(serverTagged, idLen, netx.WithDemuxAccQueue(1))
+	if err != nil {
+		t.Fatalf("Failed to create TaggedDemux: %v", err)
+	}
 	defer l.Close()
 
 	// Server: accept session, echo all messages (including responding to polls)
@@ -392,7 +407,7 @@ func TestDNST_TaggedDemux_PollConn_Echo(t *testing.T) {
 	}()
 
 	// Client: DNST → DemuxClient → PollConn
-	clientDNST := NewDNSTClientConn(p2, domain)
+	clientDNST := NewClientConn(p2, domain)
 	demuxClient, err := netx.NewDemuxClient(clientDNST, []byte("SES1"))()
 	if err != nil {
 		t.Fatalf("NewDemuxClient failed: %v", err)
@@ -425,10 +440,13 @@ func TestDNST_TaggedDemux_PollConn_ServerInitiated(t *testing.T) {
 	p1, p2 := net.Pipe()
 
 	domain := "example.com"
-	idLen := 4
+	idLen := uint8(4)
 
-	serverTagged := NewDNSTServerConn(p1, domain)
-	l := netx.NewTaggedDemux(serverTagged, idLen, netx.WithDemuxAccQueueSize(1))
+	serverTagged := NewServerConn(p1, domain)
+	l, err := netx.NewTaggedDemux(serverTagged, idLen, netx.WithDemuxAccQueue(1))
+	if err != nil {
+		t.Fatalf("Failed to create TaggedDemux: %v", err)
+	}
 	defer l.Close()
 
 	welcome := []byte("welcome")
@@ -462,7 +480,7 @@ func TestDNST_TaggedDemux_PollConn_ServerInitiated(t *testing.T) {
 	}()
 
 	// Client: DNST → DemuxClient → PollConn — don't write, just read
-	clientDNST := NewDNSTClientConn(p2, domain)
+	clientDNST := NewClientConn(p2, domain)
 	demuxClient, err := netx.NewDemuxClient(clientDNST, []byte("SES1"))()
 	if err != nil {
 		t.Fatalf("NewDemuxClient failed: %v", err)
@@ -506,13 +524,16 @@ func TestDNST_Mux_TaggedDemux_Echo(t *testing.T) {
 	defer tcpListener.Close()
 
 	domain := "example.com"
-	idLen := 4
+	idLen := uint8(4)
 
 	// Server: Mux wraps the TCP listener into a single net.Conn
 	// which is then passed to DNST → TaggedDemux → echo
 	muxConn := netx.NewMux(tcpListener)
-	serverTagged := NewDNSTServerConn(muxConn, domain)
-	demux := netx.NewTaggedDemux(serverTagged, idLen, netx.WithDemuxAccQueueSize(1))
+	serverTagged := NewServerConn(muxConn, domain)
+	demux, err := netx.NewTaggedDemux(serverTagged, idLen, netx.WithDemuxAccQueue(1))
+	if err != nil {
+		t.Fatalf("Failed to create TaggedDemux: %v", err)
+	}
 	defer demux.Close()
 
 	errCh := make(chan error, 1)
@@ -545,7 +566,7 @@ func TestDNST_Mux_TaggedDemux_Echo(t *testing.T) {
 	}
 	defer tcpConn.Close()
 
-	clientDNST := NewDNSTClientConn(tcpConn, domain)
+	clientDNST := NewClientConn(tcpConn, domain)
 	client, err := netx.NewDemuxClient(clientDNST, []byte("TST1"))()
 	if err != nil {
 		t.Fatalf("NewDemuxClient failed: %v", err)
@@ -584,14 +605,17 @@ func TestDNST_Mux_TaggedDemux_MultipleClients(t *testing.T) {
 	defer tcpListener.Close()
 
 	domain := "example.com"
-	idLen := 4
+	idLen := uint8(4)
 	addr := tcpListener.Addr().String()
 
 	// Server: Mux → DNST → TaggedDemux
 	// Each TCP connection from a different client is transparently absorbed by Mux.
 	muxConn := netx.NewMux(tcpListener)
-	serverTagged := NewDNSTServerConn(muxConn, domain)
-	demux := netx.NewTaggedDemux(serverTagged, idLen, netx.WithDemuxAccQueueSize(4))
+	serverTagged := NewServerConn(muxConn, domain)
+	demux, err := netx.NewTaggedDemux(serverTagged, idLen, netx.WithDemuxAccQueue(4))
+	if err != nil {
+		t.Fatalf("Failed to create TaggedDemux: %v", err)
+	}
 	defer demux.Close()
 
 	// Server echo loop: accept sessions and echo payloads
@@ -634,7 +658,7 @@ func TestDNST_Mux_TaggedDemux_MultipleClients(t *testing.T) {
 			t.Fatalf("Dial for %s failed: %v", c.sessID, err)
 		}
 
-		clientDNST := NewDNSTClientConn(tcpConn, domain)
+		clientDNST := NewClientConn(tcpConn, domain)
 		mc, err := netx.NewDemuxClient(clientDNST, c.sessID)()
 		if err != nil {
 			tcpConn.Close()
@@ -669,12 +693,15 @@ func TestDNST_Mux_TaggedDemux_PollConn(t *testing.T) {
 	defer tcpListener.Close()
 
 	domain := "example.com"
-	idLen := 4
+	idLen := uint8(4)
 
 	// Server: Mux → DNST → TaggedDemux → echo
 	muxConn := netx.NewMux(tcpListener)
-	serverTagged := NewDNSTServerConn(muxConn, domain)
-	demux := netx.NewTaggedDemux(serverTagged, idLen, netx.WithDemuxAccQueueSize(1))
+	serverTagged := NewServerConn(muxConn, domain)
+	demux, err := netx.NewTaggedDemux(serverTagged, idLen, netx.WithDemuxAccQueue(1))
+	if err != nil {
+		t.Fatalf("Failed to create TaggedDemux: %v", err)
+	}
 	defer demux.Close()
 
 	go func() {
@@ -702,7 +729,7 @@ func TestDNST_Mux_TaggedDemux_PollConn(t *testing.T) {
 	}
 	defer tcpConn.Close()
 
-	clientDNST := NewDNSTClientConn(tcpConn, domain)
+	clientDNST := NewClientConn(tcpConn, domain)
 	mc, err := netx.NewDemuxClient(clientDNST, []byte("SES1"))()
 	if err != nil {
 		t.Fatalf("NewDemuxClient failed: %v", err)

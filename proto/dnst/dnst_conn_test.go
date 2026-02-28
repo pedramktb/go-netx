@@ -25,7 +25,7 @@ func TestDNST_EndToEnd(t *testing.T) {
 		}
 		defer conn.Close()
 
-		serverConn := NewDNSTServerConn(conn, "example.com")
+		serverConn := NewServerConn(conn, "example.com")
 
 		// Read request
 		buf := make([]byte, 1024)
@@ -57,7 +57,7 @@ func TestDNST_EndToEnd(t *testing.T) {
 	defer conn.Close()
 
 	// Wrap with DNST Client
-	clientConn := NewDNSTClientConn(conn, "example.com")
+	clientConn := NewClientConn(conn, "example.com")
 
 	message := []byte("hello world")
 	_, err = clientConn.Write(message)
@@ -90,10 +90,10 @@ func TestDNST_PacketSize(t *testing.T) {
 	p1, p2 := net.Pipe()
 
 	// Server on p1
-	serverConn := NewDNSTServerConn(p1, "tunnel.com")
+	serverConn := NewServerConn(p1, "tunnel.com")
 
 	// Client on p2
-	clientConn := NewDNSTClientConn(p2, "tunnel.com")
+	clientConn := NewClientConn(p2, "tunnel.com")
 
 	data := []byte("test data payload")
 
