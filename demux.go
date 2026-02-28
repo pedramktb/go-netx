@@ -22,7 +22,7 @@ import (
 func init() {
 	Register("demux", func(params map[string]string, listener bool) (Wrapper, error) {
 		var id []byte
-		var bufSize, accQueueSize, sessQueueSize uint16
+		opts := []DemuxOption{}
 		for key, value := range params {
 			switch key {
 			case "id":
@@ -31,61 +31,47 @@ func init() {
 				if err != nil {
 					return Wrapper{}, fmt.Errorf("uri: invalid demux id hex parameter %q: %w", value, err)
 				}
-			case "bufsize":
+			case "accq":
+				if !listener {
+					return Wrapper{}, fmt.Errorf("uri: demux accept queue parameter is only valid for listeners")
+				}
 				size, err := strconv.ParseUint(value, 10, 16)
 				if err != nil {
-					return Wrapper{}, fmt.Errorf("uri: invalid demux bufsize parameter %q: %w", value, err)
+					return Wrapper{}, fmt.Errorf("uri: invalid demux accept queue parameter %q: %w", value, err)
 				}
-				bufSize = uint16(size)
-			case "accqueuesize":
+				opts = append(opts, WithDemuxAccQueue(uint16(size)))
+			case "sessq":
+				if !listener {
+					return Wrapper{}, fmt.Errorf("uri: demux session queue parameter is only valid for listeners")
+				}
 				size, err := strconv.ParseUint(value, 10, 16)
 				if err != nil {
-					return Wrapper{}, fmt.Errorf("uri: invalid demux accqueuesize parameter %q: %w", value, err)
+					return Wrapper{}, fmt.Errorf("uri: invalid demux session queue parameter %q: %w", value, err)
 				}
-				accQueueSize = uint16(size)
-			case "sessqueuesize":
-				size, err := strconv.ParseUint(value, 10, 16)
-				if err != nil {
-					return Wrapper{}, fmt.Errorf("uri: invalid demux sessqueuesize parameter %q: %w", value, err)
-				}
-				sessQueueSize = uint16(size)
+				opts = append(opts, WithDemuxSessQueue(uint16(size)))
 			default:
 				return Wrapper{}, fmt.Errorf("uri: unknown demux parameter %q", key)
 			}
 		}
 		if listener {
-			var opts []DemuxOption
-			if bufSize > 0 {
-				opts = append(opts, WithDemuxBufSize(bufSize))
-			}
-			if accQueueSize > 0 {
-				opts = append(opts, WithDemuxAccQueueSize(accQueueSize))
-			}
-			if sessQueueSize > 0 {
-				opts = append(opts, WithDemuxSessQueueSize(sessQueueSize))
-			}
 			return Wrapper{
 				Name:     "demux",
 				Params:   params,
 				Listener: true,
 				ConnToListener: func(c net.Conn) (net.Listener, error) {
-					return NewDemux(c, len(id), opts...), nil
+					return NewDemux(c, uint8(len(id)), opts...)
 				},
 				TaggedToListener: func(tc TaggedConn) (net.Listener, error) {
-					return NewTaggedDemux(tc, len(id), opts...), nil
+					return NewTaggedDemux(tc, uint8(len(id)), opts...)
 				},
 			}, nil
-		}
-		var clientOpts []DemuxClientOption
-		if bufSize > 0 {
-			clientOpts = append(clientOpts, WithDemuxClientBufSize(bufSize))
 		}
 		return Wrapper{
 			Name:     "demux",
 			Params:   params,
 			Listener: false,
 			ConnToDialer: func(c net.Conn) (Dialer, error) {
-				return NewDemuxClient(c, id, clientOpts...), nil
+				return NewDemuxClient(c, id), nil
 			},
 		}, nil
 	})
@@ -103,14 +89,14 @@ type demuxCore struct {
 	idMask        int // length of ID prefix in bytes
 	accQueue      chan net.Conn
 	sessQueueSize int
-	bufSize       int
+	maxWrite      uint16
 }
 
 type DemuxOption func(*demuxCore)
 
 // WithAccQueueSize sets the size of the accept queue for new sessions.
 // Default is 0.
-func WithDemuxAccQueueSize(size uint16) DemuxOption {
+func WithDemuxAccQueue(size uint16) DemuxOption {
 	return func(m *demuxCore) {
 		m.accQueue = make(chan net.Conn, size)
 	}
@@ -118,18 +104,9 @@ func WithDemuxAccQueueSize(size uint16) DemuxOption {
 
 // WithSessQueueSize sets the size of the read and write queues of the sessions.
 // Default is 8.
-func WithDemuxSessQueueSize(size uint16) DemuxOption {
+func WithDemuxSessQueue(size uint16) DemuxOption {
 	return func(m *demuxCore) {
 		m.sessQueueSize = int(size)
-	}
-}
-
-// WithSessionBufSize sets the size of the read and write buffers for each session.
-// This controls how much data is read or written from the underlying connection at once.
-// Default is 4096.
-func WithDemuxBufSize(size uint16) DemuxOption {
-	return func(m *demuxCore) {
-		m.bufSize = int(size)
 	}
 }
 
@@ -137,22 +114,27 @@ func WithDemuxBufSize(size uint16) DemuxOption {
 // Demux implements a simple connection multiplexer that allows multiple virtual connections (sessions)
 // to be multiplexed over a single underlying net.Conn.
 // idMask: The length of the session ID prefix in bytes.
-func NewDemux(c net.Conn, idMask int, opts ...DemuxOption) net.Listener {
+func NewDemux(c net.Conn, idMask uint8, opts ...DemuxOption) (net.Listener, error) {
 	m := &demux{
 		bc:       c,
 		sessions: make(map[string]*demuxSess),
 		demuxCore: demuxCore{
-			idMask:        idMask,
+			idMask:        int(idMask),
 			accQueue:      make(chan net.Conn),
-			bufSize:       4096,
 			sessQueueSize: 8,
 		},
+	}
+	if mw, ok := c.(interface{ MaxWrite() uint16 }); ok && mw.MaxWrite() != 0 {
+		if mw.MaxWrite() <= uint16(idMask) {
+			return nil, errors.New("demux: underlying connection's MaxWrite is too small for ID")
+		}
+		m.maxWrite = mw.MaxWrite() - uint16(idMask)
 	}
 	for _, opt := range opts {
 		opt(&m.demuxCore)
 	}
 	go m.readLoop()
-	return m
+	return m, nil
 }
 
 func (m *demux) Accept() (net.Conn, error) {
@@ -180,7 +162,7 @@ func (m *demux) Close() error {
 func (m *demux) readLoop() {
 	defer m.bc.Close()
 
-	buf := make([]byte, m.bufSize)
+	buf := make([]byte, MaxPacketSize)
 	for {
 		n, err := m.bc.Read(buf)
 		if err != nil {
@@ -197,11 +179,11 @@ func (m *demux) readLoop() {
 		id := data[:m.idMask]
 		payload := data[m.idMask:]
 
-		m.processPacket(id, payload, nil)
+		m.processPacket(id, payload)
 	}
 }
 
-func (m *demux) processPacket(id, payload []byte, tag any) {
+func (m *demux) processPacket(id, payload []byte) {
 	m.mu.Lock()
 	if m.sessions == nil {
 		m.mu.Unlock()
@@ -247,6 +229,10 @@ type demuxSess struct {
 	readDeadline  time.Time
 	writeDeadline time.Time
 	readDlNotify  chan struct{}
+}
+
+func (s *demuxSess) MaxWrite() uint16 {
+	return s.demux.maxWrite
 }
 
 func (s *demuxSess) Read(b []byte) (n int, err error) {
@@ -317,8 +303,8 @@ func (s *demuxSess) Write(b []byte) (n int, err error) {
 		return 0, os.ErrDeadlineExceeded
 	}
 
-	if len(b)+len(s.id) > s.demux.bufSize {
-		return 0, errors.New("demuxSess: packet may be truncated; increase demux buffer size or frame the packets")
+	if len(b)+len(s.id) > MaxPacketSize {
+		return 0, errors.New("demux: packet too large")
 	}
 
 	// Re-construct payload with ID

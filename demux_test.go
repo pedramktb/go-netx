@@ -18,9 +18,12 @@ func TestDemux_Basic(t *testing.T) {
 	defer clientConn.Close()
 	defer serverConn.Close()
 
-	idLen := 4
+	idLen := uint8(4)
 	// Create the Demux on the server side with a buffered queue to avoid dropped sessions during test startup
-	l := netx.NewDemux(serverConn, idLen, netx.WithDemuxAccQueueSize(4))
+	l, err := netx.NewDemux(serverConn, idLen, netx.WithDemuxAccQueue(4))
+	if err != nil {
+		t.Fatalf("Failed to create Demux: %v", err)
+	}
 	defer l.Close()
 
 	// Simulate a client sending a packet for session "0001"
@@ -88,7 +91,10 @@ func TestDemux_MultipleSessions(t *testing.T) {
 	defer clientConn.Close()
 	defer serverConn.Close()
 
-	l := netx.NewDemux(serverConn, 4, netx.WithDemuxAccQueueSize(4))
+	l, err := netx.NewDemux(serverConn, 4, netx.WithDemuxAccQueue(4))
+	if err != nil {
+		t.Fatalf("Failed to create Demux: %v", err)
+	}
 	defer l.Close()
 
 	var wg sync.WaitGroup
@@ -140,111 +146,14 @@ func TestDemux_MultipleSessions(t *testing.T) {
 	wg.Wait()
 }
 
-func TestDemux_Options(t *testing.T) {
-	clientConn, serverConn := net.Pipe()
-	defer clientConn.Close()
-	defer serverConn.Close()
-
-	// Test small buffer size option
-	// If buffer is too small, large packets might be dropped or truncated if Demux checks size.
-	// But Demux readLoop uses bufSize for the Read buffer.
-	l := netx.NewDemux(serverConn, 4, netx.WithDemuxBufSize(10), netx.WithDemuxAccQueueSize(4))
-	defer l.Close()
-
-	// Send a packet larger than 10 bytes (Header 4 + Payload 7 = 11 bytes)
-	// Underlying Read(buf) where len(buf)=10.
-	// net.Pipe write is 11 bytes.
-	// If Read is 10 bytes, it might read partial?
-	// For net.Pipe, "The Read blocks until the Write completes."
-	// "The data is copied directly". If read buffer is smaller, io.ErrShortBuffer?
-	// net.Pipe documentation isn't explicit on partial reads vs error.
-	// Implementation of net.Pipe uses copy().
-	// It reads min(len(data), len(buf)).
-	// So it will read 10 bytes. The remaining 1 byte?
-	// net.Pipe is a stream. The remaining 1 byte stays in the pipe? No, net.Pipe has no internal buffering.
-	// Wait, net.Pipe does NOT support partial reads easily without buffering?
-	// Actually, `pipe.Read` waits for a `pipe.Write`. If `Write` has 11 bytes and `Read` asks 10.
-	// It copies 10. The Writer is still "writing".
-	// A second `Read` can pick up the rest.
-
-	// HOWEVER, Demux implementation:
-	/*
-		n, err := c.Read(buf)
-		...
-		data := make([]byte, n)
-		copy(data, buf[:n])
-		// ...
-		id := data[:m.idMask]
-		payload := data[m.idMask:]
-	*/
-	// It treats EACH Read as a discrete packet.
-	// If `Read` returns partial packet, `demux` will treat the first chunk as `[ID][Payload]`.
-	// And the second chunk (continuation) will be treated as `[ID][Payload]` too.
-	// This confirms `demux` is VERY dependent on `Read` returning a whole packet (or `framed` connection).
-	// If we set bufSize to small, Demux will likely misinterpret data if the underlying packet is larger than bufSize.
-
-	// If I send "1234payload", and bufSize is 10.
-	// Read 10 -> "1234payloa" -> ID="1234", Payload="payloa"
-	// Next read -> "d" -> ID="d..." (too short) -> Invalid packet -> Close connection.
-
-	go func() {
-		mc, _ := netx.NewDemuxClient(clientConn, []byte("1234"))()
-		_, _ = mc.Write([]byte("longpayload")) // "1234" + "longpayload" (11 chars) = 15 bytes
-	}()
-
-	// We expect Demux to fail or close after first or second packet if it fragments.
-
-	sess, err := l.Accept()
-	if err == nil {
-		// If it accepted, let's see what we got
-		buf := make([]byte, 100)
-		n, err := sess.Read(buf)
-		// It might read "payloa" (6 bytes)
-		if err == nil {
-			if n > 6 {
-				t.Errorf("Expected truncated read due to small buffer, got %d bytes: %s", n, buf[:n])
-			}
-		}
-	}
-
-	// The Demux loop should eventually return/close due to "Invalid packet" on the remnant "d" (or subsequent chunks).
-	// But since it's async in a goroutine, observing the close is hard without waiting.
-}
-
-func TestDemuxSess_WriteTooLarge(t *testing.T) {
-	clientConn, serverConn := net.Pipe()
-	defer clientConn.Close()
-	defer serverConn.Close()
-
-	// Packet overhead is 4 bytes. Buf size 10. Max payload = 6.
-	l := netx.NewDemux(serverConn, 4, netx.WithDemuxBufSize(10), netx.WithDemuxAccQueueSize(4))
-	defer l.Close()
-
-	go func() {
-		mc, _ := netx.NewDemuxClient(clientConn, []byte("1234"))()
-		_, _ = mc.Write([]byte("hi"))
-	}()
-
-	sess, err := l.Accept()
-	if err != nil {
-		t.Fatalf("Accept failed: %v", err)
-	}
-
-	// Create payload > 6 bytes
-	largePayload := []byte("1234567") // 7 bytes
-	_, err = sess.Write(largePayload)
-	if err == nil {
-		t.Error("Expected error writing payload larger than buffer size, got nil")
-	} else if err.Error() != "demuxSess: packet may be truncated; increase demux buffer size or frame the packets" {
-		t.Errorf("Unexpected error: %v", err)
-	}
-}
-
 func TestDemux_Close(t *testing.T) {
 	clientConn, serverConn := net.Pipe()
 	// defer clientConn.Close() // Will be closed by demux
 
-	l := netx.NewDemux(serverConn, 4, netx.WithDemuxAccQueueSize(4))
+	l, err := netx.NewDemux(serverConn, 4, netx.WithDemuxAccQueue(4))
+	if err != nil {
+		t.Fatalf("Failed to create Demux: %v", err)
+	}
 
 	go func() {
 		mc, _ := netx.NewDemuxClient(clientConn, []byte("1234"))()
@@ -274,7 +183,10 @@ func TestDemux_InvalidPacket(t *testing.T) {
 	defer clientConn.Close()
 	defer serverConn.Close()
 
-	l := netx.NewDemux(serverConn, 4, netx.WithDemuxAccQueueSize(1))
+	l, err := netx.NewDemux(serverConn, 4, netx.WithDemuxAccQueue(1))
+	if err != nil {
+		t.Fatalf("Failed to create Demux: %v", err)
+	}
 	defer l.Close()
 
 	// Send packet shorter than 4 bytes
@@ -312,7 +224,7 @@ func TestDemux_InvalidPacket(t *testing.T) {
 
 	// Check if serverConn is closed. readLoop does defer c.Close().
 	// We can try to write to serverConn from client side. net.Pipe: Write to closed pipe returns error.
-	_, err := clientConn.Write([]byte("check"))
+	_, err = clientConn.Write([]byte("check"))
 	if err == nil {
 		t.Error("Expected serverConn to be closed after invalid packet, but Write succeeded")
 	} else if err != io.ErrClosedPipe {
@@ -327,7 +239,10 @@ func TestDemux_DroppedPackets(t *testing.T) {
 	defer serverConn.Close()
 
 	// Session queue size 2
-	l := netx.NewDemux(serverConn, 4, netx.WithDemuxAccQueueSize(4), netx.WithDemuxSessQueueSize(2))
+	l, err := netx.NewDemux(serverConn, 4, netx.WithDemuxAccQueue(4), netx.WithDemuxSessQueue(2))
+	if err != nil {
+		t.Fatalf("Failed to create Demux: %v", err)
+	}
 	defer l.Close()
 
 	go func() {
@@ -402,7 +317,10 @@ func TestDemuxSess_Deadline(t *testing.T) {
 	defer clientConn.Close()
 	defer serverConn.Close()
 
-	l := netx.NewDemux(serverConn, 4, netx.WithDemuxAccQueueSize(4))
+	l, err := netx.NewDemux(serverConn, 4, netx.WithDemuxAccQueue(4))
+	if err != nil {
+		t.Fatalf("Failed to create Demux: %v", err)
+	}
 	defer l.Close()
 
 	go func() {

@@ -22,22 +22,27 @@ type taggedDemux struct {
 // Demux implements a simple connection multiplexer that allows multiple virtual connections (sessions)
 // to be multiplexed over a single underlying TaggedConn.
 // idMask: The length of the session ID prefix in bytes.
-func NewTaggedDemux(c TaggedConn, idMask int, opts ...DemuxOption) net.Listener {
+func NewTaggedDemux(c TaggedConn, idMask uint8, opts ...DemuxOption) (net.Listener, error) {
 	m := &taggedDemux{
 		bc:       c,
 		sessions: make(map[string]*taggedDemuxSess),
 		demuxCore: demuxCore{
-			idMask:        idMask,
+			idMask:        int(idMask),
 			accQueue:      make(chan net.Conn),
-			bufSize:       4096,
 			sessQueueSize: 8,
 		},
+	}
+	if mw, ok := c.(interface{ MaxWrite() uint16 }); ok && mw.MaxWrite() == 0 {
+		if mw.MaxWrite() <= uint16(idMask) {
+			return nil, errors.New("demux: underlying connection's MaxWrite is too small for ID")
+		}
+		m.maxWrite = mw.MaxWrite() - uint16(idMask)
 	}
 	for _, opt := range opts {
 		opt(&m.demuxCore)
 	}
 	go m.readLoop()
-	return m
+	return m, nil
 }
 
 func (m *taggedDemux) Accept() (net.Conn, error) {
@@ -65,7 +70,7 @@ func (m *taggedDemux) Close() error {
 func (m *taggedDemux) readLoop() {
 	defer m.bc.Close()
 
-	buf := make([]byte, m.bufSize)
+	buf := make([]byte, MaxPacketSize)
 	var tag any
 	for {
 		n, err := m.bc.ReadTagged(buf, &tag)
@@ -143,6 +148,10 @@ type taggedDemuxSess struct {
 	readDeadline  time.Time
 	writeDeadline time.Time
 	readDlNotify  chan struct{}
+}
+
+func (s *taggedDemuxSess) MaxWrite() uint16 {
+	return s.demux.maxWrite
 }
 
 func (s *taggedDemuxSess) Read(b []byte) (n int, err error) {
@@ -244,8 +253,8 @@ func (s *taggedDemuxSess) Write(b []byte) (n int, err error) {
 		return 0, os.ErrDeadlineExceeded
 	}
 
-	if len(b)+len(s.id) > s.demux.bufSize {
-		return 0, errors.New("demuxSess: packet may be truncated; increase demux buffer size or frame the packets")
+	if len(b)+len(s.id) > MaxPacketSize {
+		return 0, errors.New("demux: packet too large")
 	}
 
 	// Re-construct payload with ID

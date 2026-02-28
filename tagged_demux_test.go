@@ -18,8 +18,11 @@ func TestTaggedDemux_Basic(t *testing.T) {
 	expectedReadTag := "tag-1"
 
 	// Create TaggedDemux
-	idLen := 4
-	l := netx.NewTaggedDemux(serverConn, idLen)
+	idLen := uint8(4)
+	l, err := netx.NewTaggedDemux(serverConn, idLen)
+	if err != nil {
+		t.Fatalf("Failed to create TaggedDemux: %v", err)
+	}
 	defer l.Close()
 
 	// Simulate client sending data
@@ -83,7 +86,10 @@ func TestTaggedDemux_MultipleSessions(t *testing.T) {
 	defer clientConn.Close()
 	defer serverConn.Close()
 
-	l := netx.NewTaggedDemux(serverConn, 4) // idLen = 4
+	l, err := netx.NewTaggedDemux(serverConn, 4) // idLen = 4
+	if err != nil {
+		t.Fatalf("Failed to create TaggedDemux: %v", err)
+	}
 	defer l.Close()
 
 	var wg sync.WaitGroup
@@ -181,7 +187,10 @@ func TestTaggedDemux_Close(t *testing.T) {
 	defer clientConn.Close()
 	// serverConn closed by Demux
 
-	l := netx.NewTaggedDemux(serverConn, 4)
+	l, err := netx.NewTaggedDemux(serverConn, 4)
+	if err != nil {
+		t.Fatalf("Failed to create TaggedDemux: %v", err)
+	}
 
 	// Create a session
 	go func() {
