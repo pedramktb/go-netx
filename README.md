@@ -434,26 +434,25 @@ Chains use the form `<transport>+<wrapper1>+<wrapper2>+...://host:port` where `<
 
 **Supported wrappers:**
 
-- `buffered` - Buffered read/write for better performance
-	- Params: `size` (optional, default: 4096)
+- `buf` - Buffered read/write for better performance
+	- Params: `r` (reader size), `w` (writer size), `rw` (sets both); default: 4096
 
-- `framed` - Length-prefixed frames for packet semantics over streams
-	- Params: `maxsize` (optional, default: 4096)
+- `frame` - Length-prefixed frames for packet semantics over streams
 
 - `mux` - Collapse a listener into a single `net.Conn` (server) or auto-reconnecting dialer into a `net.Conn` (client)
-	- No params
 
 - `demux` - Session multiplexer over a single conn
-	- Params: `id` (hex, required for client), `bufsize` (optional), `accqueuesize` (optional), `sessqueuesize` (optional)
+	- Params: `id` (hex, required for client), `accq` (accept queue size, optional, default: 0), `sessq` (session queue size, optional, default: 8)
 
 - `dnst` - DNS tunnel encoding (Base32 in TXT queries/responses)
 	- Params: `domain` (required)
+	- Server Params: `maxw` (max payload size for writes, optional, default: 765)
 
 - `poll` - Convert request-response conn into persistent bidirectional stream
-	- Params: `interval` (optional), `bufsize` (optional), `sendqueuesize` (optional), `recvqueuesize` (optional)
+	- Params: `interval` (optional), `sendq` (optional), `recvq` (optional)
 
 - `aesgcm` - AES-GCM encryption with passive IV exchange
-	- Params: `key`, `maxpacket` (optional, default: 32768)
+	- Params: `key`
 
 - `tls` - Transport Layer Security
 	- Server params: `cert`, `key`
@@ -474,8 +473,8 @@ Chains use the form `<transport>+<wrapper1>+<wrapper2>+...://host:port` where `<
 	- Params: `key`
 
 - `ssh` - SSH tunneling via "direct-tcpip" channels
-	- Server params: `key`, `pass` (optional), `pubkey` (optional, required if no pass)
-	- Client params: `pubkey`, `pass` (optional), `key` (optional, required if no pass)
+	- Server params: `key`, `pass` (optional), `pub` (optional, required if no pass)
+	- Client params: `pub`, `pass` (optional), `key` (optional, required if no pass)
 
 **Notes:**
 - All passwords, keys and certificates must be provided as hex-encoded strings.

@@ -101,7 +101,7 @@ func TestInt_UDP_over_TCP_TunMasters(t *testing.T) {
 	tmClient.Logger = logger
 	tmClient.SetRoute("route", func(connCtx context.Context, conn net.Conn) (bool, context.Context, netx.Tun) {
 		// Wrap the stream side with framing to preserve UDP datagrams
-		fc := netx.NewFramedConn(conn)
+		fc := netx.NewFrameConn(conn)
 		return true, connCtx, netx.Tun{
 			Logger:     logger,
 			Conn:       fc,
@@ -114,7 +114,7 @@ func TestInt_UDP_over_TCP_TunMasters(t *testing.T) {
 	var tmServer netx.TunMaster[string]
 	tmServer.Logger = logger
 	tmServer.SetRoute("route", func(connCtx context.Context, conn net.Conn) (bool, context.Context, netx.Tun) {
-		fc := netx.NewFramedConn(conn)
+		fc := netx.NewFrameConn(conn)
 		return true, connCtx, netx.Tun{
 			Logger:     logger,
 			Conn:       fc,
@@ -204,7 +204,7 @@ func TestInt_TunMasterRouting_PlainAndTLS(t *testing.T) {
 		if _, ok := conn.(interface{ ConnectionState() tls.ConnectionState }); !ok {
 			return false, connCtx, netx.Tun{}
 		}
-		fc := netx.NewFramedConn(conn)
+		fc := netx.NewFrameConn(conn)
 		return true, connCtx, netx.Tun{Logger: logger, Conn: fc, Peer: serverTunUDPTLS, BufferSize: 64 << 10}
 	})
 
@@ -214,7 +214,7 @@ func TestInt_TunMasterRouting_PlainAndTLS(t *testing.T) {
 		if _, ok := conn.(interface{ ConnectionState() tls.ConnectionState }); ok {
 			return false, connCtx, netx.Tun{}
 		}
-		fc := netx.NewFramedConn(conn)
+		fc := netx.NewFrameConn(conn)
 		return true, connCtx, netx.Tun{Logger: logger, Conn: fc, Peer: serverTunUDPPlain, BufferSize: 64 << 10}
 	})
 
@@ -243,8 +243,8 @@ func TestInt_TunMasterRouting_PlainAndTLS(t *testing.T) {
 	t.Cleanup(func() { _ = clientPeerTLS.Close(); _ = clientTunUDPTLS.Close() })
 
 	// Start client-side relays
-	go (&netx.Tun{Logger: logger, Conn: netx.NewFramedConn(clientPlain), Peer: clientTunUDPPlain, BufferSize: 64 << 10}).Relay(ctx)
-	go (&netx.Tun{Logger: logger, Conn: netx.NewFramedConn(tlsClient), Peer: clientTunUDPTLS, BufferSize: 64 << 10}).Relay(ctx)
+	go (&netx.Tun{Logger: logger, Conn: netx.NewFrameConn(clientPlain), Peer: clientTunUDPPlain, BufferSize: 64 << 10}).Relay(ctx)
+	go (&netx.Tun{Logger: logger, Conn: netx.NewFrameConn(tlsClient), Peer: clientTunUDPTLS, BufferSize: 64 << 10}).Relay(ctx)
 
 	// Deliver server-side connections to a single listener to test routing
 	lServer.ch <- serverPlain // should match plain route
