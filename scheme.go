@@ -17,7 +17,7 @@ func (s ListenerScheme) Listen(ctx context.Context, addr string, opts ...ListenO
 	if err != nil {
 		return nil, fmt.Errorf("error listening on %s://%s: %w", s.Transport.String(), addr, err)
 	}
-	wl, err := s.wrappers.Apply(l)
+	wl, err := s.Wrappers.Apply(l)
 	if err != nil {
 		return nil, fmt.Errorf("error upgrading to %s://%s: %w", s.String(), addr, err)
 	}
@@ -39,7 +39,7 @@ func (c DialerScheme) Dial(ctx context.Context, addr string, opts ...DialOption)
 	dial := func() (net.Conn, error) {
 		return Dial(ctx, c.Transport.String(), addr, opts...)
 	}
-	wdial, err := c.wrappers.Apply(dial)
+	wdial, err := c.Wrappers.Apply(dial)
 	if err != nil {
 		return nil, fmt.Errorf("error upgrading to %s://%s: %w", c.String(), addr, err)
 	}
@@ -55,13 +55,13 @@ func (c *DialerScheme) UnmarshalText(text []byte) error {
 
 type Scheme struct {
 	Transport
-	wrappers Wrappers
+	Wrappers
 }
 
 func (s Scheme) String() string {
 	str := s.Transport.String()
-	if len(s.wrappers) > 0 {
-		str += "+" + s.wrappers.String()
+	if len(s.Wrappers) > 0 {
+		str += "+" + s.Wrappers.String()
 	}
 	return str
 }
@@ -81,5 +81,5 @@ func (s *Scheme) UnmarshalText(text []byte, listener bool) error {
 	if len(parts) == 1 {
 		return nil
 	}
-	return s.wrappers.UnmarshalText([]byte(parts[1]), listener)
+	return s.Wrappers.UnmarshalText([]byte(parts[1]), listener)
 }
