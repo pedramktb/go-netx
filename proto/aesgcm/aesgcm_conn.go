@@ -23,8 +23,11 @@ import (
 	"errors"
 	"io"
 	"net"
+	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/pedramktb/go-netx"
 )
 
 type aesgcmConn struct {
@@ -32,25 +35,14 @@ type aesgcmConn struct {
 	aead cipher.AEAD
 	wiv  [12]byte
 	riv  [12]byte
-
 	// sequence number for nonce derivation, incremented atomically
-	seq atomic.Uint64
-
-	maxPacketSize int
+	seq      atomic.Uint64
+	buf      sync.Pool
+	maxWrite uint16
 }
 
-type AESGCMOption func(*aesgcmConn)
-
-// WithMaxPacket sets the maximum ciphertext packet size accepted on Read.
-// Default is 4KB. This should be >= 8 (seq) + plaintext + aead.Overhead().
-func WithAESGCMMaxPacket(size uint16) AESGCMOption {
-	return func(c *aesgcmConn) {
-		c.maxPacketSize = int(size)
-	}
-}
-
-// NewAESGCMConn creates a new AESGCMConn wrapping the provided net.Conn with the given key and options.
-func NewAESGCMConn(c net.Conn, key []byte, opts ...AESGCMOption) (net.Conn, error) {
+// NewAESGCMConn creates a new AESGCMConn wrapping the provided net.Conn with the given key.
+func NewAESGCMConn(conn net.Conn, key []byte) (net.Conn, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -60,15 +52,20 @@ func NewAESGCMConn(c net.Conn, key []byte, opts ...AESGCMOption) (net.Conn, erro
 		return nil, err
 	}
 	agc := &aesgcmConn{
-		Conn:          c,
-		aead:          a,
-		maxPacketSize: 4096,
+		Conn: conn,
+		aead: a,
+		buf: sync.Pool{
+			New: func() any {
+				b := make([]byte, netx.MaxPacketSize)
+				return &b
+			},
+		},
 	}
-	for _, opt := range opts {
-		opt(agc)
-	}
-	if agc.maxPacketSize < 8+a.Overhead() {
-		return nil, errors.New("aesgcmConn: maxPacketSize too small")
+	if mw, ok := conn.(interface{ MaxWrite() uint16 }); ok && mw.MaxWrite() != 0 {
+		if mw.MaxWrite() <= uint16(8+a.Overhead()) {
+			return nil, errors.New("demux: underlying connection's MaxWrite is too small")
+		}
+		agc.maxWrite = mw.MaxWrite() - uint16(8+a.Overhead())
 	}
 	if _, err := io.ReadFull(rand.Reader, agc.wiv[:]); err != nil {
 		return nil, err
@@ -76,21 +73,21 @@ func NewAESGCMConn(c net.Conn, key []byte, opts ...AESGCMOption) (net.Conn, erro
 
 	// Passive handshake (duplex): concurrently read peer IV while writing ours
 	handshakeDeadline := time.Now().Add(5 * time.Second)
-	_ = c.SetDeadline(handshakeDeadline)
-	defer func() { _ = c.SetDeadline(time.Time{}) }() // clear deadline after handshake
+	_ = conn.SetDeadline(handshakeDeadline)
+	defer func() { _ = conn.SetDeadline(time.Time{}) }() // clear deadline after handshake
 
 	// Start read of peer's 12-byte IV
 	readErrCh := make(chan error, 1)
 	go func() {
 		// io.ReadFull returns err if not enough bytes
-		_, err := io.ReadFull(c, agc.riv[:])
+		_, err := io.ReadFull(conn, agc.riv[:])
 		readErrCh <- err
 	}()
 
 	// Write our 12-byte IV
 	o := 0
 	for o < len(agc.wiv) {
-		n, err := c.Write(agc.wiv[o:])
+		n, err := conn.Write(agc.wiv[o:])
 		if err != nil {
 			return nil, err
 		}
@@ -108,16 +105,23 @@ func NewAESGCMConn(c net.Conn, key []byte, opts ...AESGCMOption) (net.Conn, erro
 	return agc, nil
 }
 
+func (c *aesgcmConn) MaxWrite() uint16 {
+	return c.maxWrite
+}
+
 // Read reads and decrypts a single datagram from the underlying conn.
 // If p is too small for the decrypted payload, io.ErrShortBuffer is returned.
 func (c *aesgcmConn) Read(p []byte) (int, error) {
-	buf := make([]byte, c.maxPacketSize)
+	bp := c.buf.Get().(*[]byte)
+	buf := *bp
+	defer c.buf.Put(bp)
+
 	n, err := c.Conn.Read(buf)
 	if err != nil {
 		return 0, err
 	}
-	if n == c.maxPacketSize {
-		return 0, errors.New("aesgcmConn: packet may be truncated; increase maxPacketSize")
+	if n == netx.MaxPacketSize {
+		return 0, errors.New("aesgcmConn: packet too large")
 	}
 	if n < 8+c.aead.Overhead() {
 		return 0, errors.New("aesgcmConn: packet too small")
@@ -145,10 +149,12 @@ func (c *aesgcmConn) Read(p []byte) (int, error) {
 // Write encrypts p as a single datagram and writes it to the underlying conn.
 // It prepends an 8-byte sequence number used for nonce derivation.
 func (c *aesgcmConn) Write(p []byte) (int, error) {
-	if len(p)+8+c.aead.Overhead() > c.maxPacketSize {
-		return 0, errors.New("aesgcmConn: packet may be too large; increase maxPacketSize")
+	if len(p)+8+c.aead.Overhead() > netx.MaxPacketSize {
+		return 0, errors.New("aesgcmConn: packet too large")
 	}
-	buf := make([]byte, c.maxPacketSize)
+	bp := c.buf.Get().(*[]byte)
+	buf := *bp
+	defer c.buf.Put(bp)
 
 	seq := c.seq.Add(1) - 1
 	binary.BigEndian.PutUint64(buf[:8], seq)
