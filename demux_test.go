@@ -239,7 +239,7 @@ func TestDemux_DroppedPackets(t *testing.T) {
 	defer serverConn.Close()
 
 	// Session queue size 2
-	l, err := netx.NewDemux(serverConn, 4, netx.WithDemuxAccQueue(4), netx.WithDemuxSessQueue(2))
+	l, err := netx.NewDemux(serverConn, 4, netx.WithDemuxAccQueue(4), netx.WithDemuxReadQueue(2))
 	if err != nil {
 		t.Fatalf("Failed to create Demux: %v", err)
 	}

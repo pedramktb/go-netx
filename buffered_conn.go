@@ -94,8 +94,8 @@ func NewBufConn(c net.Conn, opts ...BufConnOption) BufConn {
 		br:   bufio.NewReader(c),
 		bw:   bufio.NewWriter(c),
 	}
-	for _, opt := range opts {
-		opt(bc)
+	for _, o := range opts {
+		o(bc)
 	}
 	return bc
 }

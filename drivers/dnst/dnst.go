@@ -40,6 +40,9 @@ func init() {
 				Listener: listener,
 				ConnToTagged: func(c net.Conn) (netx.TaggedConn, error) {
 					return dnstproto.NewServerConn(c, domain, opts...), nil
+				},
+				TaggedToTagged: func(c netx.TaggedConn) (netx.TaggedConn, error) {
+					return dnstproto.NewTaggedServerConn(c, domain, opts...), nil
 				}}, nil
 		}
 		return netx.Wrapper{

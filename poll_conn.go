@@ -46,6 +46,15 @@ func init() {
 					return Wrapper{}, fmt.Errorf("poll: invalid interval parameter %q: %w", value, err)
 				}
 				opts = append(opts, WithPollInterval(dur))
+			case "timeout":
+				if !listener {
+					return Wrapper{}, fmt.Errorf("poll: timeout parameter is only valid for servers")
+				}
+				dur, err := time.ParseDuration(value)
+				if err != nil {
+					return Wrapper{}, fmt.Errorf("poll: invalid timeout parameter %q: %w", value, err)
+				}
+				opts = append(opts, WithPollTimeout(dur))
 			case "sendq":
 				size, err := strconv.ParseUint(value, 10, 16)
 				if err != nil {
@@ -91,6 +100,7 @@ type pollConnCore struct {
 	sendCh   chan []byte // server Write data queued for the next response
 	recvCh   chan []byte // received request payloads
 	interval time.Duration
+	timeout  time.Duration // server-side idle timeout; 0 means no timeout
 }
 
 type PollConnOption func(*pollConnCore)
@@ -116,10 +126,21 @@ func WithPollRecvQueue(size uint16) PollConnOption {
 // WithPollInterval sets the polling interval for idle cycles.
 // When no user data is queued, PollConn waits this duration before sending an empty
 // request to check for server-initiated data.
-// Default is 100ms.
+// Default is 1ms.
 func WithPollInterval(d time.Duration) PollConnOption {
 	return func(c *pollConnCore) {
 		c.interval = d
+	}
+}
+
+// WithPollTimeout sets the server-side idle read timeout.
+// If no request arrives from the client within this duration, PollServerConn closes
+// the connection. This lets the demux layer reclaim the stale virtual session so that
+// a reconnecting client gets a fresh one.
+// Default is 0 (no timeout).
+func WithPollTimeout(d time.Duration) PollConnOption {
+	return func(c *pollConnCore) {
+		c.timeout = d
 	}
 }
 
@@ -154,8 +175,8 @@ func NewPollServerConn(conn net.Conn, opts ...PollConnOption) net.Conn {
 		closed:       make(chan struct{}),
 		readDlNotify: make(chan struct{}),
 	}
-	for _, opt := range opts {
-		opt(&c.pollConnCore)
+	for _, o := range opts {
+		o(&c.pollConnCore)
 	}
 	go c.loop()
 	return c
@@ -163,9 +184,23 @@ func NewPollServerConn(conn net.Conn, opts ...PollConnOption) net.Conn {
 
 func (c *pollConnServer) loop() {
 	buf := make([]byte, MaxPacketSize)
+	// Close the underlying connection as soon as the loop exits so the demux
+	// session is removed from the session map eagerly, before the tun relay
+	// goroutine has a chance to cascade the close.  Without this there is a
+	// window where reconnecting-client packets land in the now-dead session's
+	// rQueue and are silently lost.
+	defer c.conn.Close()
 	defer close(c.recvCh)
 
 	for {
+		// Apply idle timeout so a silent (disconnected) client doesn't keep the
+		// session alive in the demux layer indefinitely.
+		if c.timeout > 0 {
+			if err := c.conn.SetReadDeadline(time.Now().Add(c.timeout)); err != nil {
+				return
+			}
+		}
+
 		// Read the client's request (may be empty).
 		n, err := c.conn.Read(buf)
 		if n > 0 {
@@ -179,6 +214,13 @@ func (c *pollConnServer) loop() {
 		}
 		if err != nil {
 			return
+		}
+
+		// Clear the read deadline before the write so it doesn't interfere.
+		if c.timeout > 0 {
+			if err := c.conn.SetReadDeadline(time.Time{}); err != nil {
+				return
+			}
 		}
 
 		// Respond with any queued server data, or an empty response.
@@ -367,13 +409,13 @@ func NewPollConn(conn net.Conn, opts ...PollConnOption) net.Conn {
 		pollConnCore: pollConnCore{
 			sendCh:   make(chan []byte, 32),
 			recvCh:   make(chan []byte, 32),
-			interval: 100 * time.Millisecond,
+			interval: time.Millisecond,
 		},
 		closed:       make(chan struct{}),
 		readDlNotify: make(chan struct{}),
 	}
-	for _, opt := range opts {
-		opt(&c.pollConnCore)
+	for _, o := range opts {
+		o(&c.pollConnCore)
 	}
 	go c.loop()
 	return c
@@ -418,7 +460,6 @@ func (c *pollConnClient) loop() {
 }
 
 // MaxWrite forwards the underlying connection's MaxWrite limit, if any.
-// This allows layers above (e.g. SplitConn) to respect the transport's packet-size constraint.
 func (c *pollConnClient) MaxWrite() uint16 {
 	if mw, ok := c.conn.(interface{ MaxWrite() uint16 }); ok {
 		return mw.MaxWrite()

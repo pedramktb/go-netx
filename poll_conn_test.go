@@ -440,3 +440,34 @@ func TestPollServerConn_ClosePropagatesToClient(t *testing.T) {
 		t.Error("expected error after server close, got nil")
 	}
 }
+
+// TestPollServerConn_IdleTimeout verifies that WithPollTimeout causes the server
+// connection to close when the client stops polling. This replicates the WireGuard
+// reconnect scenario: the underlying transport (demux session) stays open but the
+// poll client goes silent; the server must detect this and tear down the old virtual
+// session so that the reconnecting client gets a fresh one.
+func TestPollServerConn_IdleTimeout(t *testing.T) {
+	rawClient, rawServer := net.Pipe()
+	defer rawClient.Close()
+
+	const timeout = 50 * time.Millisecond
+	server := netx.NewPollServerConn(rawServer, netx.WithPollTimeout(timeout))
+	defer server.Close()
+
+	// rawClient is held open (live connection) but sends nothing, simulating a
+	// peer that has stopped polling while the transport layer stays up.
+
+	buf := make([]byte, 64)
+	start := time.Now()
+	// Give the test a generous outer deadline to avoid hanging on regressions.
+	_ = server.SetReadDeadline(time.Now().Add(10 * timeout))
+	_, err := server.Read(buf)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Error("expected error from server after idle timeout, got nil")
+	}
+	if elapsed > 5*timeout {
+		t.Errorf("server took too long to detect idle: %v (timeout=%v)", elapsed, timeout)
+	}
+}

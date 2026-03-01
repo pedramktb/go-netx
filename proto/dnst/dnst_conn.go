@@ -29,20 +29,24 @@ import (
 
 const serverMaxRead = 512
 
-type serverConn struct {
-	conn     net.Conn
+type serverConnCore struct {
 	encoding *base32.Encoding
 	domain   string
 	maxWrite uint16
 	buf      sync.Pool
 }
 
-type ServerOption func(*serverConn)
+type serverConn struct {
+	conn net.Conn
+	serverConnCore
+}
+
+type ServerOption func(*serverConnCore)
 
 // WithMaxWrite sets the maximum ciphertext packet size accepted on server writes.
 // Default is 765 bytes, which given a 255 byte QNAME is the maximum based on a UDP transport with an MTU of 1500.
 func WithMaxWrite(size uint16) ServerOption {
-	return func(c *serverConn) {
+	return func(c *serverConnCore) {
 		c.maxWrite = size
 	}
 }
@@ -52,19 +56,21 @@ func WithMaxWrite(size uint16) ServerOption {
 // https://github.com/pedramktb/go-netx/blob/main/docs/mux-tag-poll.md
 func NewServerConn(conn net.Conn, domain string, opts ...ServerOption) netx.TaggedConn {
 	ds := &serverConn{
-		conn:     conn,
-		encoding: base32.StdEncoding.WithPadding(base32.NoPadding),
-		domain:   strings.TrimSuffix(domain, ".") + ".",
-		maxWrite: 765,
-		buf: sync.Pool{
-			New: func() any {
-				b := make([]byte, serverMaxRead)
-				return &b
+		conn: conn,
+		serverConnCore: serverConnCore{
+			encoding: base32.StdEncoding.WithPadding(base32.NoPadding),
+			domain:   strings.TrimSuffix(domain, ".") + ".",
+			maxWrite: 765,
+			buf: sync.Pool{
+				New: func() any {
+					b := make([]byte, serverMaxRead)
+					return &b
+				},
 			},
 		},
 	}
-	for _, opt := range opts {
-		opt(ds)
+	for _, o := range opts {
+		o(&ds.serverConnCore)
 	}
 	return ds
 }
@@ -143,6 +149,121 @@ func (c *serverConn) RemoteAddr() net.Addr               { return c.conn.RemoteA
 func (c *serverConn) SetDeadline(t time.Time) error      { return c.conn.SetDeadline(t) }
 func (c *serverConn) SetReadDeadline(t time.Time) error  { return c.conn.SetReadDeadline(t) }
 func (c *serverConn) SetWriteDeadline(t time.Time) error { return c.conn.SetWriteDeadline(t) }
+
+// serverConnTagged is the tag returned by taggedServerConn.ReadTagged.
+// It carries both the parsed DNS message (for forming the reply) and the
+// tag from the underlying TaggedConn (for routing the write back to the
+// correct underlying connection, e.g. a specific TCP conn inside a Mux).
+type serverConnTagged struct {
+	dnsMsg  *dns.Msg
+	connTag any
+}
+
+// taggedServerConn is like serverConn but operates on an underlying TaggedConn
+// instead of a plain net.Conn so that the underlying-connection routing tag is
+// preserved end-to-end through the DNST layer.
+type taggedServerConn struct {
+	conn netx.TaggedConn
+	serverConnCore
+}
+
+// NewTaggedServerConn creates a new DNST server connection that operates on an
+// underlying TaggedConn (e.g. a Mux that aggregates multiple TCP connections).
+// The tag returned by ReadTagged is a serverConnTagged value that carries both
+// the DNS message (to form the TXT response) and the forwarded tag from the
+// underlying TaggedConn (to route the write back to the correct connection).
+func NewTaggedServerConn(conn netx.TaggedConn, domain string, opts ...ServerOption) netx.TaggedConn {
+	ds := &taggedServerConn{
+		conn: conn,
+		serverConnCore: serverConnCore{
+			encoding: base32.StdEncoding.WithPadding(base32.NoPadding),
+			domain:   strings.TrimSuffix(domain, ".") + ".",
+			maxWrite: 765,
+			buf: sync.Pool{
+				New: func() any {
+					b := make([]byte, serverMaxRead)
+					return &b
+				},
+			},
+		},
+	}
+	for _, o := range opts {
+		o(&ds.serverConnCore)
+	}
+	return ds
+}
+
+func (c *taggedServerConn) MaxWrite() uint16 { return c.maxWrite }
+
+func (c *taggedServerConn) ReadTagged(b []byte, tag *any) (n int, err error) {
+	bp := c.buf.Get().(*[]byte)
+	buf := *bp
+	defer c.buf.Put(bp)
+
+	var subTag any
+	n, err = c.conn.ReadTagged(buf, &subTag)
+	if err != nil {
+		return 0, err
+	}
+	m := new(dns.Msg)
+	if err := m.Unpack(buf[:n]); err != nil {
+		return 0, err
+	}
+	if tag != nil {
+		*tag = serverConnTagged{dnsMsg: m, connTag: subTag}
+	}
+
+	if len(m.Question) == 0 {
+		return 0, nil
+	}
+	qName := m.Question[0].Name
+	if !strings.HasSuffix(strings.ToLower(qName), c.domain) {
+		return 0, errors.New("invalid domain")
+	}
+	encoded := qName[:len(qName)-len(c.domain)-1]
+	encoded = strings.ReplaceAll(encoded, ".", "")
+
+	data, err := c.encoding.DecodeString(encoded)
+	if err != nil {
+		return 0, err
+	}
+	return copy(b, data), nil
+}
+
+func (c *taggedServerConn) WriteTagged(b []byte, tag any) (n int, err error) {
+	ct, ok := tag.(serverConnTagged)
+	if !ok || ct.dnsMsg == nil {
+		return 0, errors.New("invalid context for dnst tagged write")
+	}
+	reqMsg := ct.dnsMsg
+
+	resp := new(dns.Msg)
+	resp.SetReply(reqMsg)
+	resp.Compress = false
+
+	encoded := c.encoding.EncodeToString(b)
+	txt := &dns.TXT{
+		Hdr: dns.RR_Header{Name: reqMsg.Question[0].Name, Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: 0},
+		Txt: splitString(encoded, 255),
+	}
+	resp.Answer = append(resp.Answer, txt)
+
+	out, err := resp.Pack()
+	if err != nil {
+		return 0, err
+	}
+	if _, err := c.conn.WriteTagged(out, ct.connTag); err != nil {
+		return 0, err
+	}
+	return len(b), nil
+}
+
+func (c *taggedServerConn) Close() error                       { return c.conn.Close() }
+func (c *taggedServerConn) LocalAddr() net.Addr                { return c.conn.LocalAddr() }
+func (c *taggedServerConn) RemoteAddr() net.Addr               { return c.conn.RemoteAddr() }
+func (c *taggedServerConn) SetDeadline(t time.Time) error      { return c.conn.SetDeadline(t) }
+func (c *taggedServerConn) SetReadDeadline(t time.Time) error  { return c.conn.SetReadDeadline(t) }
+func (c *taggedServerConn) SetWriteDeadline(t time.Time) error { return c.conn.SetWriteDeadline(t) }
 
 type clientConn struct {
 	net.Conn

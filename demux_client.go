@@ -36,16 +36,7 @@ func NewDemuxClient(c net.Conn, id []byte) Dialer {
 	}
 }
 
-func (m *demuxClient) Write(b []byte) (n int, err error) {
-	n, err = m.Conn.Write(append(m.id, b...))
-	if err != nil {
-		return 0, err
-	}
-	if n < len(m.id) {
-		return 0, io.ErrShortWrite
-	}
-	return n - len(m.id), nil
-}
+func (m *demuxClient) MaxWrite() uint16 { return m.writeMax }
 
 func (m *demuxClient) Read(b []byte) (n int, err error) {
 	bp := m.buf.Get().(*[]byte)
@@ -71,8 +62,18 @@ func (m *demuxClient) Read(b []byte) (n int, err error) {
 	return n - len(m.id), nil
 }
 
-func (m *demuxClient) ID() []byte { return m.id }
+func (m *demuxClient) Write(b []byte) (n int, err error) {
+	n, err = m.Conn.Write(append(m.id, b...))
+	if err != nil {
+		return 0, err
+	}
+	if n < len(m.id) {
+		return 0, io.ErrShortWrite
+	}
+	return n - len(m.id), nil
+}
 
-// MaxWrite returns the maximum payload size for a single Write, accounting for the ID prefix.
-// Returns 0 if the underlying connection does not advertise a limit.
-func (m *demuxClient) MaxWrite() uint16 { return m.writeMax }
+func (m *demuxClient) ID() []byte { return m.id }
+func (m *demuxClient) LocalAddr() net.Addr {
+	return &demuxVirtualAddr{Addr: m.Conn.LocalAddr(), id: m.id}
+}

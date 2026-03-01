@@ -131,9 +131,11 @@ type Wrapper struct {
 
 	ListenerToListener func(net.Listener) (net.Listener, error)
 	ListenerToConn     func(net.Listener) (net.Conn, error)
+	ListenerToTagged   func(net.Listener) (TaggedConn, error)
 
 	DialerToDialer func(Dialer) (Dialer, error)
 	DialerToConn   func(Dialer) (net.Conn, error)
+	DialerToTagged func(Dialer) (TaggedConn, error)
 
 	ConnToConn     func(net.Conn) (net.Conn, error)
 	ConnToTagged   func(net.Conn) (TaggedConn, error)
@@ -141,21 +143,23 @@ type Wrapper struct {
 	ConnToDialer   func(net.Conn) (Dialer, error)
 
 	TaggedToTagged   func(TaggedConn) (TaggedConn, error)
+	TaggedToConn     func(TaggedConn) (net.Conn, error)
 	TaggedToListener func(TaggedConn) (net.Listener, error)
+	TaggedToDialer   func(TaggedConn) (Dialer, error)
 }
 
 func (w Wrapper) InputTypes() []PipeType {
 	var types []PipeType
-	if w.ListenerToListener != nil || w.ListenerToConn != nil {
+	if w.ListenerToListener != nil || w.ListenerToConn != nil || w.ListenerToTagged != nil {
 		types = append(types, PipeTypeListener)
 	}
-	if w.DialerToDialer != nil || w.DialerToConn != nil {
+	if w.DialerToDialer != nil || w.DialerToConn != nil || w.DialerToTagged != nil {
 		types = append(types, PipeTypeDialer)
 	}
 	if w.ConnToConn != nil || w.ConnToTagged != nil || w.ConnToListener != nil || w.ConnToDialer != nil {
 		types = append(types, PipeTypeConn)
 	}
-	if w.TaggedToTagged != nil || w.TaggedToListener != nil {
+	if w.TaggedToTagged != nil || w.TaggedToConn != nil || w.TaggedToListener != nil || w.TaggedToDialer != nil {
 		types = append(types, PipeTypeTaggedConn)
 	}
 	return types
@@ -171,6 +175,8 @@ func (w Wrapper) OutputFor(input PipeType) (PipeType, bool) {
 			return PipeTypeListener, true
 		case w.ListenerToConn != nil:
 			return PipeTypeConn, true
+		case w.ListenerToTagged != nil:
+			return PipeTypeTaggedConn, true
 		}
 	case PipeTypeDialer:
 		switch {
@@ -178,6 +184,8 @@ func (w Wrapper) OutputFor(input PipeType) (PipeType, bool) {
 			return PipeTypeDialer, true
 		case w.DialerToConn != nil:
 			return PipeTypeConn, true
+		case w.DialerToTagged != nil:
+			return PipeTypeTaggedConn, true
 		}
 	case PipeTypeConn:
 		switch {
@@ -194,8 +202,12 @@ func (w Wrapper) OutputFor(input PipeType) (PipeType, bool) {
 		switch {
 		case w.TaggedToTagged != nil:
 			return PipeTypeTaggedConn, true
+		case w.TaggedToConn != nil:
+			return PipeTypeConn, true
 		case w.TaggedToListener != nil:
 			return PipeTypeListener, true
+		case w.TaggedToDialer != nil:
+			return PipeTypeDialer, true
 		}
 	}
 	return 0, false
@@ -212,6 +224,8 @@ func (w Wrapper) Apply(v any) (any, error) {
 			return w.ListenerToListener(v)
 		case w.ListenerToConn != nil:
 			return w.ListenerToConn(v)
+		case w.ListenerToTagged != nil:
+			return w.ListenerToTagged(v)
 		}
 	case Dialer:
 		switch {
@@ -219,6 +233,8 @@ func (w Wrapper) Apply(v any) (any, error) {
 			return w.DialerToDialer(v)
 		case w.DialerToConn != nil:
 			return w.DialerToConn(v)
+		case w.DialerToTagged != nil:
+			return w.DialerToTagged(v)
 		}
 	case net.Conn:
 		switch {
@@ -235,8 +251,12 @@ func (w Wrapper) Apply(v any) (any, error) {
 		switch {
 		case w.TaggedToTagged != nil:
 			return w.TaggedToTagged(v)
+		case w.TaggedToConn != nil:
+			return w.TaggedToConn(v)
 		case w.TaggedToListener != nil:
 			return w.TaggedToListener(v)
+		case w.TaggedToDialer != nil:
+			return w.TaggedToDialer(v)
 		}
 	}
 	return nil, fmt.Errorf("wrapper %q: incompatible type %T", w.Name, v)

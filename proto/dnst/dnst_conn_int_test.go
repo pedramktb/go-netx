@@ -526,10 +526,10 @@ func TestDNST_Mux_TaggedDemux_Echo(t *testing.T) {
 	domain := "example.com"
 	idLen := uint8(4)
 
-	// Server: Mux wraps the TCP listener into a single net.Conn
+	// Server: Mux wraps the TCP listener into a TaggedConn
 	// which is then passed to DNST → TaggedDemux → echo
 	muxConn := netx.NewMux(tcpListener)
-	serverTagged := NewServerConn(muxConn, domain)
+	serverTagged := NewTaggedServerConn(muxConn, domain)
 	demux, err := netx.NewTaggedDemux(serverTagged, idLen, netx.WithDemuxAccQueue(1))
 	if err != nil {
 		t.Fatalf("Failed to create TaggedDemux: %v", err)
@@ -611,7 +611,7 @@ func TestDNST_Mux_TaggedDemux_MultipleClients(t *testing.T) {
 	// Server: Mux → DNST → TaggedDemux
 	// Each TCP connection from a different client is transparently absorbed by Mux.
 	muxConn := netx.NewMux(tcpListener)
-	serverTagged := NewServerConn(muxConn, domain)
+	serverTagged := NewTaggedServerConn(muxConn, domain)
 	demux, err := netx.NewTaggedDemux(serverTagged, idLen, netx.WithDemuxAccQueue(4))
 	if err != nil {
 		t.Fatalf("Failed to create TaggedDemux: %v", err)
@@ -697,7 +697,7 @@ func TestDNST_Mux_TaggedDemux_PollConn(t *testing.T) {
 
 	// Server: Mux → DNST → TaggedDemux → echo
 	muxConn := netx.NewMux(tcpListener)
-	serverTagged := NewServerConn(muxConn, domain)
+	serverTagged := NewTaggedServerConn(muxConn, domain)
 	demux, err := netx.NewTaggedDemux(serverTagged, idLen, netx.WithDemuxAccQueue(1))
 	if err != nil {
 		t.Fatalf("Failed to create TaggedDemux: %v", err)

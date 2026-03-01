@@ -43,8 +43,8 @@ func Run(ctx context.Context, cancel context.CancelFunc, opts ...Option) (exitCo
 		err:  os.Stderr,
 	}
 
-	for _, opt := range opts {
-		opt(&cfg)
+	for _, o := range opts {
+		o(&cfg)
 	}
 
 	var logLevel string

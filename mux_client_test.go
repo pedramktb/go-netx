@@ -28,9 +28,7 @@ func TestMuxClient_SingleConnection(t *testing.T) {
 	msg := []byte("hello mux client")
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		c, err := ln.Accept()
 		if err != nil {
 			t.Errorf("accept: %v", err)
@@ -47,7 +45,7 @@ func TestMuxClient_SingleConnection(t *testing.T) {
 		if _, err := c.Write(buf[:n]); err != nil {
 			t.Errorf("write: %v", err)
 		}
-	}()
+	})
 
 	// Write through the MuxClient (triggers dial)
 	if _, err := dc.Write(msg); err != nil {
@@ -111,12 +109,10 @@ func TestMuxClient_RequestResponse(t *testing.T) {
 
 	rounds := 3
 	var wg sync.WaitGroup
-	wg.Add(1)
 
 	// Server: accept one connection and handle multiple request-response
 	// rounds on it (connection stays open).
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		c, err := ln.Accept()
 		if err != nil {
 			t.Errorf("accept: %v", err)
@@ -135,9 +131,9 @@ func TestMuxClient_RequestResponse(t *testing.T) {
 				return
 			}
 		}
-	}()
+	})
 
-	for i := 0; i < rounds; i++ {
+	for i := range rounds {
 		msg := []byte{byte('A' + i)}
 		if _, err := dc.Write(msg); err != nil {
 			t.Fatalf("write %d: %v", i, err)
@@ -200,31 +196,6 @@ func TestMuxClient_WriteTriggersDialOnNoConnection(t *testing.T) {
 	// First write should trigger a dial
 	if _, err := dc.Write([]byte("trigger")); err != nil {
 		t.Fatalf("write: %v", err)
-	}
-}
-
-func TestMuxClient_LocalAddr_NoConnection(t *testing.T) {
-	dc := netx.NewMuxClient(func() (net.Conn, error) {
-		return nil, errors.New("not dialling")
-	})
-	defer dc.Close()
-
-	addr := dc.LocalAddr()
-	if addr == nil {
-		t.Fatal("LocalAddr returned nil")
-	}
-}
-
-func TestMuxClient_RemoteAddr_WithOption(t *testing.T) {
-	fakeAddr, _ := net.ResolveTCPAddr("tcp", "1.2.3.4:5678")
-	dc := netx.NewMuxClient(func() (net.Conn, error) {
-		return nil, errors.New("not dialling")
-	}, netx.WithMuxClientRemoteAddr(fakeAddr))
-	defer dc.Close()
-
-	addr := dc.RemoteAddr()
-	if addr.String() != "1.2.3.4:5678" {
-		t.Fatalf("RemoteAddr: got %v, want 1.2.3.4:5678", addr)
 	}
 }
 

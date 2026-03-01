@@ -40,15 +40,15 @@ func init() {
 					return Wrapper{}, fmt.Errorf("uri: invalid demux accept queue parameter %q: %w", value, err)
 				}
 				opts = append(opts, WithDemuxAccQueue(uint16(size)))
-			case "sessq":
+			case "rq":
 				if !listener {
-					return Wrapper{}, fmt.Errorf("uri: demux session queue parameter is only valid for listeners")
+					return Wrapper{}, fmt.Errorf("uri: demux session read queue parameter is only valid for listeners")
 				}
 				size, err := strconv.ParseUint(value, 10, 16)
 				if err != nil {
 					return Wrapper{}, fmt.Errorf("uri: invalid demux session queue parameter %q: %w", value, err)
 				}
-				opts = append(opts, WithDemuxSessQueue(uint16(size)))
+				opts = append(opts, WithDemuxReadQueue(uint16(size)))
 			default:
 				return Wrapper{}, fmt.Errorf("uri: unknown demux parameter %q", key)
 			}
@@ -86,27 +86,27 @@ type demux struct {
 }
 
 type demuxCore struct {
-	idMask        int // length of ID prefix in bytes
-	accQueue      chan net.Conn
-	sessQueueSize int
-	maxWrite      uint16
+	idMask            int // length of ID prefix in bytes
+	accQueue          chan net.Conn
+	sessReadQueueSize int
+	maxWrite          uint16
 }
 
 type DemuxOption func(*demuxCore)
 
 // WithAccQueueSize sets the size of the accept queue for new sessions.
-// Default is 0.
+// Default is 1.
 func WithDemuxAccQueue(size uint16) DemuxOption {
 	return func(m *demuxCore) {
 		m.accQueue = make(chan net.Conn, size)
 	}
 }
 
-// WithSessQueueSize sets the size of the read and write queues of the sessions.
-// Default is 8.
-func WithDemuxSessQueue(size uint16) DemuxOption {
+// WithReadQueueSize sets the size of the read queues of the sessions.
+// Default is 128.
+func WithDemuxReadQueue(size uint16) DemuxOption {
 	return func(m *demuxCore) {
-		m.sessQueueSize = int(size)
+		m.sessReadQueueSize = int(size)
 	}
 }
 
@@ -119,9 +119,9 @@ func NewDemux(c net.Conn, idMask uint8, opts ...DemuxOption) (net.Listener, erro
 		bc:       c,
 		sessions: make(map[string]*demuxSess),
 		demuxCore: demuxCore{
-			idMask:        int(idMask),
-			accQueue:      make(chan net.Conn),
-			sessQueueSize: 8,
+			idMask:            int(idMask),
+			accQueue:          make(chan net.Conn, 1),
+			sessReadQueueSize: 128,
 		},
 	}
 	if mw, ok := c.(interface{ MaxWrite() uint16 }); ok && mw.MaxWrite() != 0 {
@@ -130,8 +130,8 @@ func NewDemux(c net.Conn, idMask uint8, opts ...DemuxOption) (net.Listener, erro
 		}
 		m.maxWrite = mw.MaxWrite() - uint16(idMask)
 	}
-	for _, opt := range opts {
-		opt(&m.demuxCore)
+	for _, o := range opts {
+		o(&m.demuxCore)
 	}
 	go m.readLoop()
 	return m, nil
@@ -194,8 +194,7 @@ func (m *demux) processPacket(id, payload []byte) {
 		sess = &demuxSess{
 			demux:        m,
 			id:           id,
-			rmtAddr:      m.bc.RemoteAddr(),
-			rQueue:       make(chan []byte, m.sessQueueSize),
+			rQueue:       make(chan []byte, m.sessReadQueueSize),
 			readDlNotify: make(chan struct{}),
 		}
 
@@ -221,7 +220,6 @@ func (m *demux) Addr() net.Addr { return m.bc.LocalAddr() }
 type demuxSess struct {
 	demux         *demux
 	id            []byte
-	rmtAddr       net.Addr
 	closing       atomic.Bool
 	rQueue        chan []byte
 	unread        []byte
@@ -334,9 +332,11 @@ func (s *demuxSess) Close() error {
 	return nil
 }
 
-func (s *demuxSess) ID() []byte           { return s.id }
-func (s *demuxSess) LocalAddr() net.Addr  { return s.demux.Addr() }
-func (s *demuxSess) RemoteAddr() net.Addr { return s.rmtAddr }
+func (s *demuxSess) ID() []byte          { return s.id }
+func (s *demuxSess) LocalAddr() net.Addr { return s.demux.Addr() }
+func (s *demuxSess) RemoteAddr() net.Addr {
+	return &demuxVirtualAddr{Addr: s.demux.bc.RemoteAddr(), id: s.id}
+}
 func (s *demuxSess) SetDeadline(t time.Time) error {
 	if err := s.SetReadDeadline(t); err != nil {
 		return err
@@ -360,4 +360,13 @@ func (s *demuxSess) SetWriteDeadline(t time.Time) error {
 	defer s.mu.Unlock()
 	s.writeDeadline = t
 	return nil
+}
+
+type demuxVirtualAddr struct {
+	net.Addr
+	id []byte
+}
+
+func (a *demuxVirtualAddr) String() string {
+	return a.String() + ":" + hex.EncodeToString(a.id)
 }

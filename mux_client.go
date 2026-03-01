@@ -39,27 +39,10 @@ type muxClient struct {
 	readDeadline  time.Time
 	writeDeadline time.Time
 
-	localAddr  net.Addr
-	remoteAddr net.Addr
+	localAddr net.Addr
 }
 
 type MuxClientOption func(*muxClient)
-
-// WithMuxClientLocalAddr sets the address returned by LocalAddr when no
-// underlying connection is established yet.
-func WithMuxClientLocalAddr(addr net.Addr) MuxClientOption {
-	return func(dc *muxClient) {
-		dc.localAddr = addr
-	}
-}
-
-// WithMuxClientRemoteAddr sets the address returned by RemoteAddr when no
-// underlying connection is established yet.
-func WithMuxClientRemoteAddr(addr net.Addr) MuxClientOption {
-	return func(dc *muxClient) {
-		dc.remoteAddr = addr
-	}
-}
 
 // NewMuxClient wraps a dial function as a net.Conn.
 // A new connection is obtained by calling dial on the first Read/Write and whenever
@@ -192,27 +175,11 @@ func (c *muxClient) Close() error {
 }
 
 func (c *muxClient) LocalAddr() net.Addr {
-	c.connMu.RLock()
-	defer c.connMu.RUnlock()
-	if c.current != nil {
-		return c.current.LocalAddr()
-	}
-	if c.localAddr != nil {
-		return c.localAddr
-	}
-	return undefinedAddr{}
+	return &muxVirtualAddr{}
 }
 
 func (c *muxClient) RemoteAddr() net.Addr {
-	c.connMu.RLock()
-	defer c.connMu.RUnlock()
-	if c.current != nil {
-		return c.current.RemoteAddr()
-	}
-	if c.remoteAddr != nil {
-		return c.remoteAddr
-	}
-	return undefinedAddr{}
+	return &muxVirtualAddr{}
 }
 
 func (c *muxClient) SetDeadline(t time.Time) error {
@@ -254,10 +221,3 @@ func (c *muxClient) SetWriteDeadline(t time.Time) error {
 	}
 	return nil
 }
-
-// undefinedAddr is returned when no underlying connection exists and no
-// fallback address was provided via options.
-type undefinedAddr struct{}
-
-func (undefinedAddr) Network() string { return "undefined" }
-func (undefinedAddr) String() string  { return "<undefined>" }

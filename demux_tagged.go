@@ -27,9 +27,9 @@ func NewTaggedDemux(c TaggedConn, idMask uint8, opts ...DemuxOption) (net.Listen
 		bc:       c,
 		sessions: make(map[string]*taggedDemuxSess),
 		demuxCore: demuxCore{
-			idMask:        int(idMask),
-			accQueue:      make(chan net.Conn),
-			sessQueueSize: 8,
+			idMask:            int(idMask),
+			accQueue:          make(chan net.Conn, 1),
+			sessReadQueueSize: 128,
 		},
 	}
 	if mw, ok := c.(interface{ MaxWrite() uint16 }); ok && mw.MaxWrite() != 0 {
@@ -38,8 +38,8 @@ func NewTaggedDemux(c TaggedConn, idMask uint8, opts ...DemuxOption) (net.Listen
 		}
 		m.maxWrite = mw.MaxWrite() - uint16(idMask)
 	}
-	for _, opt := range opts {
-		opt(&m.demuxCore)
+	for _, o := range opts {
+		o(&m.demuxCore)
 	}
 	go m.readLoop()
 	return m, nil
@@ -100,14 +100,13 @@ func (m *taggedDemux) processPacket(id, payload []byte, tag any) {
 	sess, exists := m.sessions[string(id)]
 	if !exists {
 		sess = &taggedDemuxSess{
-			demux:   m,
-			id:      id,
-			rmtAddr: m.bc.RemoteAddr(),
+			demux: m,
+			id:    id,
 			rQueue: make(chan struct {
 				data []byte
 				tag  any
-			}, m.sessQueueSize),
-			tagQueue:     make(chan any, m.sessQueueSize*2),
+			}, m.sessReadQueueSize),
+			tagQueue:     make(chan any, m.sessReadQueueSize*2),
 			closed:       make(chan struct{}),
 			readDlNotify: make(chan struct{}),
 		}
@@ -135,7 +134,6 @@ func (m *taggedDemux) Addr() net.Addr { return m.bc.LocalAddr() }
 type taggedDemuxSess struct {
 	demux   *taggedDemux
 	id      []byte
-	rmtAddr net.Addr
 	closing atomic.Bool
 	rQueue  chan struct {
 		data []byte
@@ -285,9 +283,11 @@ func (s *taggedDemuxSess) Close() error {
 	return nil
 }
 
-func (s *taggedDemuxSess) ID() []byte           { return s.id }
-func (s *taggedDemuxSess) LocalAddr() net.Addr  { return s.demux.Addr() }
-func (s *taggedDemuxSess) RemoteAddr() net.Addr { return s.rmtAddr }
+func (s *taggedDemuxSess) ID() []byte          { return s.id }
+func (s *taggedDemuxSess) LocalAddr() net.Addr { return s.demux.Addr() }
+func (s *taggedDemuxSess) RemoteAddr() net.Addr {
+	return &demuxVirtualAddr{Addr: s.demux.bc.RemoteAddr(), id: s.id}
+}
 func (s *taggedDemuxSess) SetDeadline(t time.Time) error {
 	if err := s.SetReadDeadline(t); err != nil {
 		return err
