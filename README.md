@@ -435,7 +435,7 @@ Chains use the form `<transport>+<wrapper1>+<wrapper2>+...://host:port` where `<
 **Supported wrappers:**
 
 - `buf` - Buffered read/write for better performance
-	- Params: `r` (reader size), `w` (writer size), `rw` (sets both); default: 4096
+	- Params: `r` (reader size), `w` (writer size)
 
 - `frame` - Length-prefixed frames for packet semantics over streams
 

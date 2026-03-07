@@ -62,7 +62,7 @@ func (s *Server[ID]) Serve(ctx context.Context, listener net.Listener) error {
 			if s.closing.Load() {
 				return ErrServerClosed
 			}
-			s.Logger.WarnContext(ctx, "error accepting connection", "error", err.Error())
+			s.Logger.WarnContext(ctx, "error accepting connection", "error", err)
 			continue
 		}
 		go s.route(ctx, conn)

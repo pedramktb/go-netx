@@ -7,10 +7,12 @@ The session ID is used to route packets to the correct virtual connection.
 package netx
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"strconv"
@@ -86,6 +88,7 @@ type demux struct {
 }
 
 type demuxCore struct {
+	logger            Logger
 	idMask            int // length of ID prefix in bytes
 	accQueue          chan net.Conn
 	sessReadQueueSize int
@@ -110,6 +113,13 @@ func WithDemuxReadQueue(size uint16) DemuxOption {
 	}
 }
 
+// WithLogger sets the logger for the demux and its sessions.
+func WithDemuxLogger(logger Logger) DemuxOption {
+	return func(m *demuxCore) {
+		m.logger = logger
+	}
+}
+
 // NewDemux creates a new Demux.
 // Demux implements a simple connection multiplexer that allows multiple virtual connections (sessions)
 // to be multiplexed over a single underlying net.Conn.
@@ -119,6 +129,7 @@ func NewDemux(c net.Conn, idMask uint8, opts ...DemuxOption) (net.Listener, erro
 		bc:       c,
 		sessions: make(map[string]*demuxSess),
 		demuxCore: demuxCore{
+			logger:            slog.Default(),
 			idMask:            int(idMask),
 			accQueue:          make(chan net.Conn, 1),
 			sessReadQueueSize: 128,
@@ -160,12 +171,13 @@ func (m *demux) Close() error {
 }
 
 func (m *demux) readLoop() {
-	defer m.bc.Close()
+	defer m.Close()
 
 	buf := make([]byte, MaxPacketSize)
 	for {
 		n, err := m.bc.Read(buf)
 		if err != nil {
+			m.logger.ErrorContext(context.Background(), "demux: error reading from underlying connection", "error", err)
 			return
 		}
 		// Only copying the read data instead of recreating the buffer can reduce IO allocations by about 50%.
@@ -173,8 +185,9 @@ func (m *demux) readLoop() {
 		copy(data, buf[:n])
 		// Extract session ID from the beginning of the packet
 		if len(data) < m.idMask {
-			// Invalid packet, close connection
-			return
+			// Invalid packet, ignore
+			m.logger.DebugContext(context.Background(), "demux: received packet too small to contain ID, ignoring", "packetSize", len(data), "idMask", m.idMask)
+			continue
 		}
 		id := data[:m.idMask]
 		payload := data[m.idMask:]
@@ -203,6 +216,7 @@ func (m *demux) processPacket(id, payload []byte) {
 		case m.accQueue <- sess:
 		default:
 			// If the accept queue is full, drop the new session to avoid blocking the read loop.
+			m.logger.WarnContext(context.Background(), "demux: accept queue full, dropping new session", "id", hex.EncodeToString(id))
 			delete(m.sessions, string(id))
 		}
 	}
@@ -210,6 +224,7 @@ func (m *demux) processPacket(id, payload []byte) {
 	case sess.rQueue <- payload:
 	default:
 		// If the session's read queue is full, drop the packet to avoid blocking the read loop.
+		m.logger.WarnContext(context.Background(), "demux: session read queue full, dropping packet", "id", hex.EncodeToString(id))
 	}
 	m.mu.Unlock()
 }
@@ -332,11 +347,6 @@ func (s *demuxSess) Close() error {
 	return nil
 }
 
-func (s *demuxSess) ID() []byte          { return s.id }
-func (s *demuxSess) LocalAddr() net.Addr { return s.demux.Addr() }
-func (s *demuxSess) RemoteAddr() net.Addr {
-	return &demuxVirtualAddr{Addr: s.demux.bc.RemoteAddr(), id: s.id}
-}
 func (s *demuxSess) SetDeadline(t time.Time) error {
 	if err := s.SetReadDeadline(t); err != nil {
 		return err
@@ -362,11 +372,16 @@ func (s *demuxSess) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
+func (s *demuxSess) LocalAddr() net.Addr { return s.demux.Addr() }
+func (s *demuxSess) RemoteAddr() net.Addr {
+	return &demuxVirtualAddr{Addr: s.demux.bc.RemoteAddr(), id: s.id}
+}
+
 type demuxVirtualAddr struct {
 	net.Addr
 	id []byte
 }
 
 func (a *demuxVirtualAddr) String() string {
-	return a.String() + ":" + hex.EncodeToString(a.id)
+	return a.Addr.String() + ":" + hex.EncodeToString(a.id)
 }

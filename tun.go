@@ -34,10 +34,10 @@ func (t *Tun) Relay(ctx context.Context) {
 	sendErr := <-sendErrCh
 	recvErr := <-recvErrCh
 	if sendErr != nil {
-		t.Logger.ErrorContext(ctx, "error copying data from peer to tun", "error", sendErr.Error())
+		t.Logger.ErrorContext(ctx, "error copying data from peer to tun", "error", sendErr)
 	}
 	if recvErr != nil {
-		t.Logger.ErrorContext(ctx, "error copying data from tun to peer", "error", recvErr.Error())
+		t.Logger.ErrorContext(ctx, "error copying data from tun to peer", "error", recvErr)
 	}
 }
 

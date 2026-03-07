@@ -16,8 +16,10 @@ Ref: https://web.archive.org/web/20200208203702/http://gray-world.net/papers/dns
 package netx
 
 import (
+	"context"
 	"encoding/base32"
 	"errors"
+	"log/slog"
 	"net"
 	"strings"
 	"sync"
@@ -30,6 +32,7 @@ import (
 const serverMaxRead = 512
 
 type serverConnCore struct {
+	logger   netx.Logger
 	encoding *base32.Encoding
 	domain   string
 	maxWrite uint16
@@ -51,6 +54,13 @@ func WithMaxWrite(size uint16) ServerOption {
 	}
 }
 
+// WithServerLogger sets a logger for the connection to use for internal logging (e.g. for logging invalid packets).
+func WithServerLogger(logger netx.Logger) ServerOption {
+	return func(c *serverConnCore) {
+		c.logger = logger
+	}
+}
+
 // NewServerConn creates a new DNST server connection.
 // See how to use a DNST Tagged Conn:
 // https://github.com/pedramktb/go-netx/blob/main/docs/mux-tag-poll.md
@@ -58,6 +68,7 @@ func NewServerConn(conn net.Conn, domain string, opts ...ServerOption) netx.Tagg
 	ds := &serverConn{
 		conn: conn,
 		serverConnCore: serverConnCore{
+			logger:   slog.Default(),
 			encoding: base32.StdEncoding.WithPadding(base32.NoPadding),
 			domain:   strings.TrimSuffix(domain, ".") + ".",
 			maxWrite: 765,
@@ -79,38 +90,51 @@ func NewServerConn(conn net.Conn, domain string, opts ...ServerOption) netx.Tagg
 func (c *serverConn) MaxWrite() uint16 { return c.maxWrite }
 
 // ReadTagged reads a packet and returns the associated DNS query context.
+// Invalid packets (DNS parse errors, wrong domain, bad encoding, no question)
+// are silently skipped so that spurious DNS traffic on port 53 does not
+// terminate the connection.
 func (c *serverConn) ReadTagged(b []byte, tag *any) (n int, err error) {
-	bp := c.buf.Get().(*[]byte)
-	buf := *bp
-	defer c.buf.Put(bp)
+	for {
+		bp := c.buf.Get().(*[]byte)
+		buf := *bp
 
-	n, err = c.conn.Read(buf)
-	if err != nil {
-		return 0, err
-	}
-	m := new(dns.Msg)
-	if err := m.Unpack(buf[:n]); err != nil {
-		return 0, err
-	}
-	*tag = m
+		n, err = c.conn.Read(buf)
+		if err != nil {
+			c.logger.DebugContext(context.Background(), "dnst: error reading from connection", "error", err, "remoteAddr", c.RemoteAddr().Network()+"://"+c.RemoteAddr().String())
+			c.buf.Put(bp)
+			return 0, err
+		}
+		m := new(dns.Msg)
+		if err := m.Unpack(buf[:n]); err != nil {
+			c.logger.DebugContext(context.Background(), "dnst: received invalid DNS packet, skipping", "error", err, "remoteAddr", c.RemoteAddr().Network()+"://"+c.RemoteAddr().String())
+			c.buf.Put(bp)
+			continue // skip invalid DNS packet
+		}
+		c.buf.Put(bp)
 
-	if len(m.Question) == 0 {
-		return 0, nil
-	}
-	qName := m.Question[0].Name
-	if !strings.HasSuffix(strings.ToLower(qName), c.domain) {
-		return 0, errors.New("invalid domain")
-	}
-	encoded := qName[:len(qName)-len(c.domain)-1]
-	// Remove label-separator dots inserted by the client to form valid DNS labels.
-	encoded = strings.ReplaceAll(encoded, ".", "")
+		*tag = m
 
-	data, err := c.encoding.DecodeString(encoded)
-	if err != nil {
-		return 0, err
-	}
+		if len(m.Question) == 0 {
+			c.logger.DebugContext(context.Background(), "dnst: received DNS query with no question, skipping", "remoteAddr", c.RemoteAddr().Network()+"://"+c.RemoteAddr().String())
+			continue // skip DNS messages with no question
+		}
+		qName := m.Question[0].Name
+		if !strings.HasSuffix(strings.ToLower(qName), c.domain) {
+			c.logger.DebugContext(context.Background(), "dnst: received DNS query for unrelated domain, skipping", "qName", qName, "remoteAddr", c.RemoteAddr().Network()+"://"+c.RemoteAddr().String())
+			continue // skip queries for unrelated domains
+		}
+		encoded := qName[:len(qName)-len(c.domain)-1]
+		// Remove label-separator dots inserted by the client to form valid DNS labels.
+		encoded = strings.ReplaceAll(encoded, ".", "")
 
-	return copy(b, data), nil
+		data, decErr := c.encoding.DecodeString(encoded)
+		if decErr != nil {
+			c.logger.DebugContext(context.Background(), "dnst: received DNS query with invalid encoding, skipping", "remoteAddr", "error", decErr, c.RemoteAddr().Network()+"://"+c.RemoteAddr().String())
+			continue // skip packets with invalid encoding
+		}
+
+		return copy(b, data), nil
+	}
 }
 
 // WriteTagged writes a packet using the provided DNS query context to form a response.
@@ -195,39 +219,53 @@ func NewTaggedServerConn(conn netx.TaggedConn, domain string, opts ...ServerOpti
 
 func (c *taggedServerConn) MaxWrite() uint16 { return c.maxWrite }
 
+// ReadTagged reads a packet and returns the associated DNS query context.
+// Invalid packets (DNS parse errors, wrong domain, bad encoding, no question)
+// are silently skipped so that spurious DNS traffic on port 53 does not
+// terminate the connection.
 func (c *taggedServerConn) ReadTagged(b []byte, tag *any) (n int, err error) {
-	bp := c.buf.Get().(*[]byte)
-	buf := *bp
-	defer c.buf.Put(bp)
+	for {
+		bp := c.buf.Get().(*[]byte)
+		buf := *bp
 
-	var subTag any
-	n, err = c.conn.ReadTagged(buf, &subTag)
-	if err != nil {
-		return 0, err
-	}
-	m := new(dns.Msg)
-	if err := m.Unpack(buf[:n]); err != nil {
-		return 0, err
-	}
-	if tag != nil {
-		*tag = serverConnTagged{dnsMsg: m, connTag: subTag}
-	}
+		var subTag any
+		n, err = c.conn.ReadTagged(buf, &subTag)
+		if err != nil {
+			c.logger.DebugContext(context.Background(), "dnst: error reading from connection", "remoteAddr", "error", err, c.RemoteAddr().Network()+"://"+c.RemoteAddr().String())
+			c.buf.Put(bp)
+			return 0, err
+		}
+		m := new(dns.Msg)
+		if err := m.Unpack(buf[:n]); err != nil {
+			c.logger.DebugContext(context.Background(), "dnst: received invalid DNS packet, skipping", "error", err, "remoteAddr", c.RemoteAddr().Network()+"://"+c.RemoteAddr().String())
+			c.buf.Put(bp)
+			continue // skip invalid DNS packet
+		}
+		c.buf.Put(bp)
 
-	if len(m.Question) == 0 {
-		return 0, nil
-	}
-	qName := m.Question[0].Name
-	if !strings.HasSuffix(strings.ToLower(qName), c.domain) {
-		return 0, errors.New("invalid domain")
-	}
-	encoded := qName[:len(qName)-len(c.domain)-1]
-	encoded = strings.ReplaceAll(encoded, ".", "")
+		if tag != nil {
+			*tag = serverConnTagged{dnsMsg: m, connTag: subTag}
+		}
 
-	data, err := c.encoding.DecodeString(encoded)
-	if err != nil {
-		return 0, err
+		if len(m.Question) == 0 {
+			c.logger.DebugContext(context.Background(), "dnst: received DNS query with no question, skipping", "remoteAddr", c.RemoteAddr().Network()+"://"+c.RemoteAddr().String())
+			continue // skip DNS messages with no question
+		}
+		qName := m.Question[0].Name
+		if !strings.HasSuffix(strings.ToLower(qName), c.domain) {
+			c.logger.DebugContext(context.Background(), "dnst: received DNS query for unrelated domain, skipping", "qName", qName, "remoteAddr", c.RemoteAddr().Network()+"://"+c.RemoteAddr().String())
+			continue // skip queries for unrelated domains
+		}
+		encoded := qName[:len(qName)-len(c.domain)-1]
+		encoded = strings.ReplaceAll(encoded, ".", "")
+
+		data, decErr := c.encoding.DecodeString(encoded)
+		if decErr != nil {
+			c.logger.DebugContext(context.Background(), "dnst: received DNS query with invalid encoding, skipping", "error", decErr, "remoteAddr", c.RemoteAddr().Network()+"://"+c.RemoteAddr().String())
+			continue // skip packets with invalid encoding
+		}
+		return copy(b, data), nil
 	}
-	return copy(b, data), nil
 }
 
 func (c *taggedServerConn) WriteTagged(b []byte, tag any) (n int, err error) {

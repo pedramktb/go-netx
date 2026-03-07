@@ -22,12 +22,6 @@ func init() {
 		opts := []BufConnOption{}
 		for key, value := range params {
 			switch key {
-			case "rw":
-				size, err := strconv.ParseUint(value, 10, 16)
-				if err != nil {
-					return Wrapper{}, fmt.Errorf("buf: invalid read/write size parameter %q: %w", value, err)
-				}
-				opts = append(opts, WithBufRead(uint16(size)), WithBufWrite(uint16(size)))
 			case "r":
 				size, err := strconv.ParseUint(value, 10, 16)
 				if err != nil {

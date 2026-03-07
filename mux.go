@@ -15,8 +15,10 @@ return the response on the same connection the request arrived on.
 package netx
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"strconv"
@@ -70,6 +72,7 @@ type muxPacket struct {
 }
 
 type mux struct {
+	logger   Logger
 	listener net.Listener
 	closed   atomic.Bool
 
@@ -98,6 +101,13 @@ func WithMuxReadQueue(size uint16) MuxOption {
 	}
 }
 
+// WithMuxLogger sets a logger for the Mux to use for internal logging.
+func WithMuxLogger(logger Logger) MuxOption {
+	return func(m *mux) {
+		m.logger = logger
+	}
+}
+
 // NewMux wraps a net.Listener as a TaggedConn.
 // Each connection accepted from the listener is serviced concurrently by an
 // internal goroutine that forwards received data—together with the source
@@ -111,6 +121,7 @@ func WithMuxReadQueue(size uint16) MuxOption {
 // the listener.
 func NewMux(ln net.Listener, opts ...MuxOption) TaggedConn {
 	m := &mux{
+		logger:   slog.Default(),
 		listener: ln,
 		doneCh:   make(chan struct{}),
 		rQueue:   make(chan muxPacket, 64),
@@ -139,7 +150,12 @@ func (c *mux) acceptLoop() {
 	for {
 		conn, err := c.listener.Accept()
 		if err != nil {
-			return
+			c.logger.WarnContext(context.Background(), "mux: error accepting connection", "error", err)
+			if c.closed.Load() {
+				c.logger.DebugContext(context.Background(), "mux: listener closed, stopping accept loop")
+				return
+			}
+			continue
 		}
 
 		c.deadlineMu.Lock()
@@ -168,6 +184,7 @@ func (c *mux) acceptLoop() {
 // readConn reads from a single underlying connection and forwards packets to
 // the shared readQueue. It exits on EOF, any error, or mux close.
 func (c *mux) readConn(conn net.Conn) {
+	c.logger.DebugContext(context.Background(), "mux: new connection accepted", "remoteAddr", conn.RemoteAddr().Network()+"://"+conn.RemoteAddr().String())
 	defer func() {
 		_ = conn.Close()
 		c.connMu.Lock()
@@ -177,7 +194,7 @@ func (c *mux) readConn(conn net.Conn) {
 		c.connMu.Unlock()
 	}()
 
-	buf := make([]byte, 65536)
+	buf := make([]byte, MaxPacketSize)
 	for {
 		n, err := conn.Read(buf)
 		if n > 0 {
@@ -186,10 +203,12 @@ func (c *mux) readConn(conn net.Conn) {
 			select {
 			case c.rQueue <- muxPacket{data: data, conn: conn}:
 			case <-c.doneCh:
+				c.logger.DebugContext(context.Background(), "mux: mux closed, stopping read loop", "remoteAddr", conn.RemoteAddr().Network()+"://"+conn.RemoteAddr().String())
 				return
 			}
 		}
 		if err != nil {
+			c.logger.DebugContext(context.Background(), "mux: error reading from connection", "error", err, "remoteAddr", conn.RemoteAddr().Network()+"://"+conn.RemoteAddr().String())
 			return
 		}
 	}
@@ -270,14 +289,6 @@ func (c *mux) Close() error {
 	return c.listener.Close()
 }
 
-func (c *mux) LocalAddr() net.Addr {
-	return c.listener.Addr()
-}
-
-func (c *mux) RemoteAddr() net.Addr {
-	return &muxVirtualAddr{}
-}
-
 func (c *mux) SetDeadline(t time.Time) error {
 	if err := c.SetReadDeadline(t); err != nil {
 		return err
@@ -316,6 +327,9 @@ func (c *mux) SetWriteDeadline(t time.Time) error {
 	}
 	return errors.Join(errs...)
 }
+
+func (c *mux) LocalAddr() net.Addr  { return c.listener.Addr() }
+func (c *mux) RemoteAddr() net.Addr { return &muxVirtualAddr{} }
 
 type muxVirtualAddr struct{}
 

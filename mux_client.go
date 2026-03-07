@@ -13,8 +13,10 @@ wraps a dial function into a net.Conn by dialing outgoing connections on demand.
 package netx
 
 import (
+	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -26,6 +28,7 @@ import (
 type Dialer = func() (net.Conn, error)
 
 type muxClient struct {
+	logger Logger
 	dial   Dialer
 	closed atomic.Bool
 
@@ -38,11 +41,16 @@ type muxClient struct {
 	deadlineMu    sync.Mutex
 	readDeadline  time.Time
 	writeDeadline time.Time
-
-	localAddr net.Addr
 }
 
 type MuxClientOption func(*muxClient)
+
+// WithMuxClientLogger sets a logger for the MuxClient to use for internal logging.
+func WithMuxClientLogger(logger Logger) MuxClientOption {
+	return func(c *muxClient) {
+		c.logger = logger
+	}
+}
 
 // NewMuxClient wraps a dial function as a net.Conn.
 // A new connection is obtained by calling dial on the first Read/Write and whenever
@@ -50,7 +58,10 @@ type MuxClientOption func(*muxClient)
 // Closing the returned conn closes the current underlying connection (if any) and
 // prevents further dialling.
 func NewMuxClient(dial Dialer, opts ...MuxClientOption) net.Conn {
-	dc := &muxClient{dial: dial}
+	dc := &muxClient{
+		logger: slog.Default(),
+		dial:   dial,
+	}
 	for _, o := range opts {
 		o(dc)
 	}
@@ -77,8 +88,10 @@ func (c *muxClient) ensureConn() (net.Conn, error) {
 
 	newConn, err := c.dial()
 	if err != nil {
+		c.logger.WarnContext(context.Background(), "muxClient: error dialing new connection", "error", err)
 		return nil, err
 	}
+	c.logger.DebugContext(context.Background(), "muxClient: dialing new connection", "localAddr", newConn.LocalAddr().Network()+"://"+newConn.LocalAddr().String())
 
 	c.deadlineMu.Lock()
 	rd, wd := c.readDeadline, c.writeDeadline
@@ -99,6 +112,7 @@ func (c *muxClient) ensureConn() (net.Conn, error) {
 func (c *muxClient) replaceCurrent(old net.Conn) {
 	c.connMu.Lock()
 	if c.current == old {
+		c.logger.DebugContext(context.Background(), "muxClient: closing current connection", "localAddr", c.current.LocalAddr().Network()+"://"+c.current.LocalAddr().String())
 		_ = c.current.Close()
 		c.current = nil
 	}
@@ -174,14 +188,6 @@ func (c *muxClient) Close() error {
 	return nil
 }
 
-func (c *muxClient) LocalAddr() net.Addr {
-	return &muxVirtualAddr{}
-}
-
-func (c *muxClient) RemoteAddr() net.Addr {
-	return &muxVirtualAddr{}
-}
-
 func (c *muxClient) SetDeadline(t time.Time) error {
 	c.deadlineMu.Lock()
 	c.readDeadline = t
@@ -221,3 +227,6 @@ func (c *muxClient) SetWriteDeadline(t time.Time) error {
 	}
 	return nil
 }
+
+func (c *muxClient) LocalAddr() net.Addr  { return &muxVirtualAddr{} }
+func (c *muxClient) RemoteAddr() net.Addr { return &muxVirtualAddr{} }
