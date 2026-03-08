@@ -19,8 +19,11 @@ type Tun struct {
 	closing    atomic.Bool
 }
 
-// Relay copies data between the two connections until
+// Relay copies data between the two connections until either side encounters an error or is closed.
 func (t *Tun) Relay(ctx context.Context) {
+	if t.Conn == nil || t.Peer == nil {
+		return
+	}
 	if t.Logger == nil {
 		t.Logger = slog.Default()
 	}
