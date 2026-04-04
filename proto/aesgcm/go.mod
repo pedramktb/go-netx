@@ -2,7 +2,7 @@ module github.com/pedramktb/go-netx/proto/aesgcm
 
 go 1.25.7
 
-require github.com/pedramktb/go-netx v1.3.0
+require github.com/pedramktb/go-netx v1.4.0
 
 require (
 	github.com/pion/transport/v3 v3.1.1 // indirect

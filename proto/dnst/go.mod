@@ -4,7 +4,7 @@ go 1.25.7
 
 require (
 	github.com/miekg/dns v1.1.72
-	github.com/pedramktb/go-netx v1.3.0
+	github.com/pedramktb/go-netx v1.4.0
 )
 
 require (
