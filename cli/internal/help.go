@@ -5,7 +5,7 @@ const uriFormat = `URI Format:
 
 	Examples:
 		tcp+tls{cert=$(cat server.crt | xxd -p),key=$(cat server.key | xxd -p)}://:9000
-		tcp+tls{cert=$(cat client.crt | xxd -p)}+buffered{size=8192}+framed{maxsize=4096}+aesgcm{key=00112233445566778899aabbccddeeff}://example.com:9443
+		tcp+tls{cert=$(cat client.crt | xxd -p)}+buf{r=8192,w=8192}+frame{maxsize=4096}+aesgcm{key=00112233445566778899aabbccddeeff}://example.com:9443
 
 	Supported transports:
 		- tcp: TCP listener or dialer
@@ -13,10 +13,10 @@ const uriFormat = `URI Format:
 		- icmp: ICMP listener or dialer
 
 	Supported layers:
-		- framed: length-prefixed frames for transports or layers that need packet semantics over streams.
+		- frame: length-prefixed frames for transports or layers that need packet semantics over streams.
 			params: maxsize (optional, defaults to 32768)
-		- buffered: buffered read/write for better performance when using framing.
-			params: size (optional, defaults to 4096)
+		- buf: buffered read/write for better performance when using framing.
+			params: r (optional, read buffer size, defaults to 4096), w (optional, write buffer size, defaults to 4096)
 		- aesgcm: AES-GCM encryption. A passive 12-byte handshake exchanges IVs.
 			params: key, maxpacket (optional, defaults to 32768)
 		- ssh: SSH tunneling via "direct-tcpip" channels.
