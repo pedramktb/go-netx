@@ -1,14 +1,22 @@
 package netx
 
 import (
+	"context"
+	"encoding/hex"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+type taggedDemuxPacket struct {
+	data []byte
+	tag  any
+}
 
 type taggedDemux struct {
 	bc       TaggedConn
@@ -22,22 +30,28 @@ type taggedDemux struct {
 // Demux implements a simple connection multiplexer that allows multiple virtual connections (sessions)
 // to be multiplexed over a single underlying TaggedConn.
 // idMask: The length of the session ID prefix in bytes.
-func NewTaggedDemux(c TaggedConn, idMask int, opts ...DemuxOption) net.Listener {
+func NewTaggedDemux(c TaggedConn, idMask uint8, opts ...DemuxOption) (net.Listener, error) {
 	m := &taggedDemux{
 		bc:       c,
 		sessions: make(map[string]*taggedDemuxSess),
 		demuxCore: demuxCore{
-			idMask:        idMask,
-			accQueue:      make(chan net.Conn),
-			bufSize:       4096,
-			sessQueueSize: 8,
+			logger:            slog.Default(),
+			idMask:            int(idMask),
+			accQueue:          make(chan net.Conn, 1),
+			sessReadQueueSize: 128,
 		},
 	}
-	for _, opt := range opts {
-		opt(&m.demuxCore)
+	if mw, ok := c.(interface{ MaxWrite() uint16 }); ok && mw.MaxWrite() != 0 {
+		if mw.MaxWrite() <= uint16(idMask) {
+			return nil, errors.New("demux: underlying connection's MaxWrite is too small for ID")
+		}
+		m.maxWrite = mw.MaxWrite() - uint16(idMask)
+	}
+	for _, o := range opts {
+		o(&m.demuxCore)
 	}
 	go m.readLoop()
-	return m
+	return m, nil
 }
 
 func (m *taggedDemux) Accept() (net.Conn, error) {
@@ -63,13 +77,14 @@ func (m *taggedDemux) Close() error {
 }
 
 func (m *taggedDemux) readLoop() {
-	defer m.bc.Close()
+	defer m.Close()
 
-	buf := make([]byte, m.bufSize)
+	buf := make([]byte, MaxPacketSize)
 	var tag any
 	for {
 		n, err := m.bc.ReadTagged(buf, &tag)
 		if err != nil {
+			m.logger.ErrorContext(context.Background(), "demux: error reading from underlying connection", "error", err)
 			return
 		}
 
@@ -77,7 +92,9 @@ func (m *taggedDemux) readLoop() {
 		copy(data, buf[:n])
 
 		if len(data) < m.idMask {
-			return
+			// Invalid packet, ignore
+			m.logger.DebugContext(context.Background(), "demux: received packet too small to contain ID, ignoring", "packetSize", len(data), "idMask", m.idMask)
+			continue
 		}
 		id := data[:m.idMask]
 		payload := data[m.idMask:]
@@ -95,14 +112,10 @@ func (m *taggedDemux) processPacket(id, payload []byte, tag any) {
 	sess, exists := m.sessions[string(id)]
 	if !exists {
 		sess = &taggedDemuxSess{
-			demux:   m,
-			id:      id,
-			rmtAddr: m.bc.RemoteAddr(),
-			rQueue: make(chan struct {
-				data []byte
-				tag  any
-			}, m.sessQueueSize),
-			tagQueue:     make(chan any, m.sessQueueSize*2),
+			demux:        m,
+			id:           id,
+			rQueue:       make(chan taggedDemuxPacket, m.sessReadQueueSize),
+			tagQueue:     make(chan any, m.sessReadQueueSize*2),
 			closed:       make(chan struct{}),
 			readDlNotify: make(chan struct{}),
 		}
@@ -112,30 +125,25 @@ func (m *taggedDemux) processPacket(id, payload []byte, tag any) {
 		case m.accQueue <- sess:
 		default:
 			// If the accept queue is full, drop the new session to avoid blocking the read loop.
+			m.logger.WarnContext(context.Background(), "demux: accept queue full, dropping new session", "id", hex.EncodeToString(id))
 			delete(m.sessions, string(id))
 		}
 	}
 	select {
-	case sess.rQueue <- struct {
-		data []byte
-		tag  any
-	}{data: payload, tag: tag}:
+	case sess.rQueue <- taggedDemuxPacket{data: payload, tag: tag}:
 	default:
 		// If the session's read queue is full, drop the packet to avoid blocking the read loop.
+		m.logger.WarnContext(context.Background(), "demux: session read queue full, dropping packet", "id", hex.EncodeToString(id))
 	}
 	m.mu.Unlock()
 }
 func (m *taggedDemux) Addr() net.Addr { return m.bc.LocalAddr() }
 
 type taggedDemuxSess struct {
-	demux   *taggedDemux
-	id      []byte
-	rmtAddr net.Addr
-	closing atomic.Bool
-	rQueue  chan struct {
-		data []byte
-		tag  any
-	}
+	demux         *taggedDemux
+	id            []byte
+	closing       atomic.Bool
+	rQueue        chan taggedDemuxPacket
 	tagQueue      chan any
 	closed        chan struct{}
 	unread        []byte
@@ -143,6 +151,10 @@ type taggedDemuxSess struct {
 	readDeadline  time.Time
 	writeDeadline time.Time
 	readDlNotify  chan struct{}
+}
+
+func (s *taggedDemuxSess) MaxWrite() uint16 {
+	return s.demux.maxWrite
 }
 
 func (s *taggedDemuxSess) Read(b []byte) (n int, err error) {
@@ -244,8 +256,8 @@ func (s *taggedDemuxSess) Write(b []byte) (n int, err error) {
 		return 0, os.ErrDeadlineExceeded
 	}
 
-	if len(b)+len(s.id) > s.demux.bufSize {
-		return 0, errors.New("demuxSess: packet may be truncated; increase demux buffer size or frame the packets")
+	if len(b)+len(s.id) > MaxPacketSize {
+		return 0, errors.New("demux: packet too large")
 	}
 
 	// Re-construct payload with ID
@@ -276,9 +288,6 @@ func (s *taggedDemuxSess) Close() error {
 	return nil
 }
 
-func (s *taggedDemuxSess) ID() []byte           { return s.id }
-func (s *taggedDemuxSess) LocalAddr() net.Addr  { return s.demux.Addr() }
-func (s *taggedDemuxSess) RemoteAddr() net.Addr { return s.rmtAddr }
 func (s *taggedDemuxSess) SetDeadline(t time.Time) error {
 	if err := s.SetReadDeadline(t); err != nil {
 		return err
@@ -302,4 +311,9 @@ func (s *taggedDemuxSess) SetWriteDeadline(t time.Time) error {
 	defer s.mu.Unlock()
 	s.writeDeadline = t
 	return nil
+}
+
+func (s *taggedDemuxSess) LocalAddr() net.Addr { return s.demux.Addr() }
+func (s *taggedDemuxSess) RemoteAddr() net.Addr {
+	return &demuxVirtualAddr{Addr: s.demux.bc.RemoteAddr(), id: s.id}
 }

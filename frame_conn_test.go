@@ -26,12 +26,12 @@ func writeFrame(t *testing.T, c net.Conn, payload []byte) {
 	}
 }
 
-func TestFramedConnSimple(t *testing.T) {
+func TestFrameConnSimple(t *testing.T) {
 	clientRaw, serverRaw := net.Pipe()
 	t.Cleanup(func() { _ = clientRaw.Close(); _ = serverRaw.Close() })
 
-	fcClient := netx.NewFramedConn(clientRaw)
-	fcServer := netx.NewFramedConn(serverRaw)
+	fcClient := netx.NewFrameConn(clientRaw)
+	fcServer := netx.NewFrameConn(serverRaw)
 
 	// send one frame
 	msg := []byte("hello frame")
@@ -58,12 +58,12 @@ func TestFramedConnSimple(t *testing.T) {
 	}
 }
 
-func TestFramedConnPartialRead(t *testing.T) {
+func TestFrameConnPartialRead(t *testing.T) {
 	clientRaw, serverRaw := net.Pipe()
 	t.Cleanup(func() { _ = clientRaw.Close(); _ = serverRaw.Close() })
 
-	fcClient := netx.NewFramedConn(clientRaw)
-	fcServer := netx.NewFramedConn(serverRaw)
+	fcClient := netx.NewFrameConn(clientRaw)
+	fcServer := netx.NewFrameConn(serverRaw)
 
 	data := bytes.Repeat([]byte("x"), 1024)
 	// Start reader first to avoid pipe deadlock
@@ -101,11 +101,11 @@ func TestFramedConnPartialRead(t *testing.T) {
 	}
 }
 
-func TestFramedConnDeliversEmptyFrames(t *testing.T) {
+func TestFrameConnDeliversEmptyFrames(t *testing.T) {
 	clientRaw, serverRaw := net.Pipe()
 	t.Cleanup(func() { _ = clientRaw.Close(); _ = serverRaw.Close() })
 
-	fcServer := netx.NewFramedConn(serverRaw)
+	fcServer := netx.NewFrameConn(serverRaw)
 
 	// write two empty frames and then a payload on the client side using raw writer
 	payload := []byte("data")
@@ -140,38 +140,5 @@ func TestFramedConnDeliversEmptyFrames(t *testing.T) {
 	case <-doneWrite:
 	case <-time.After(2 * time.Second):
 		t.Fatalf("writer blocked")
-	}
-}
-
-func TestFramedConnMaxSize(t *testing.T) {
-	clientRaw, serverRaw := net.Pipe()
-	t.Cleanup(func() { _ = clientRaw.Close(); _ = serverRaw.Close() })
-
-	// Set small max frame size
-	fcServer := netx.NewFramedConn(serverRaw, netx.WithMaxFrameSize(32))
-
-	// Start a read and only send an oversized header so the reader errors
-	buf := make([]byte, 10)
-	errCh := make(chan error, 1)
-	go func() {
-		_, err := fcServer.Read(buf)
-		errCh <- err
-	}()
-	time.Sleep(10 * time.Millisecond)
-	var hdr [2]byte
-	binary.BigEndian.PutUint16(hdr[:], 64) // larger than max 32
-	if _, err := clientRaw.Write(hdr[:]); err != nil {
-		t.Fatalf("write hdr: %v", err)
-	}
-	select {
-	case err := <-errCh:
-		if err == nil {
-			t.Fatalf("expected ErrFrameTooLarge")
-		}
-		if err != netx.ErrFrameTooLarge {
-			t.Fatalf("got err=%v want ErrFrameTooLarge", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timeout waiting for error")
 	}
 }

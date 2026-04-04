@@ -4,62 +4,53 @@ import (
 	"errors"
 	"io"
 	"net"
+	"sync"
 )
 
 type demuxClient struct {
 	net.Conn
-	tc      TaggedConn
-	id      []byte
-	bufSize int
+	id       []byte
+	buf      sync.Pool
+	writeMax uint16
 }
 
-type DemuxClientOption func(*demuxClient)
-
-// WithDemuxClientBufSize sets the size of the write buffer for the demux client.
-// This controls how much data is written to the underlying connection at once.
-// Default is 4096.
-func WithDemuxClientBufSize(size uint16) DemuxClientOption {
-	return func(c *demuxClient) {
-		c.bufSize = int(size)
-	}
-}
-
-func NewDemuxClient(c net.Conn, id []byte, opts ...DemuxClientOption) Dialer {
+func NewDemuxClient(c net.Conn, id []byte) Dialer {
 	return func() (net.Conn, error) {
 		m := &demuxClient{
-			Conn:    c,
-			id:      id,
-			bufSize: 4096,
+			Conn: c,
+			id:   id,
+			buf: sync.Pool{
+				New: func() any {
+					b := make([]byte, MaxPacketSize)
+					return &b
+				},
+			},
 		}
-		if tc, ok := c.(TaggedConn); ok {
-			m.tc = tc
-		}
-		for _, opt := range opts {
-			opt(m)
+		if mw, ok := c.(interface{ MaxWrite() uint16 }); ok && mw.MaxWrite() != 0 {
+			if mw.MaxWrite() <= uint16(len(id)) {
+				return nil, errors.New("demuxClient: underlying connection's MaxWrite is too small for ID")
+			}
+			m.writeMax = mw.MaxWrite() - uint16(len(id))
 		}
 		return m, nil
 	}
 }
 
-func (m *demuxClient) Write(b []byte) (n int, err error) {
-	if len(b)+len(m.id) > m.bufSize {
-		return 0, errors.New("demuxClient: packet may be truncated; increase demux buffer size or frame the packets")
-	}
-	n, err = m.Conn.Write(append(m.id, b...))
-	if err != nil {
-		return 0, err
-	}
-	if n < len(m.id) {
-		return 0, io.ErrShortWrite
-	}
-	return n - len(m.id), nil
-}
+func (m *demuxClient) MaxWrite() uint16 { return m.writeMax }
 
 func (m *demuxClient) Read(b []byte) (n int, err error) {
-	buf := make([]byte, m.bufSize)
+	bp := m.buf.Get().(*[]byte)
+	buf := *bp
+	defer m.buf.Put(bp)
+
 	n, err = m.Conn.Read(buf)
 	if err != nil {
 		return 0, err
+	}
+	if n == 0 {
+		// Underlying transport returned an empty read (e.g. empty DNS TXT response).
+		// Treat it as a no-data cycle, not an error.
+		return 0, nil
 	}
 	if n < len(m.id) {
 		return 0, io.ErrUnexpectedEOF
@@ -71,4 +62,23 @@ func (m *demuxClient) Read(b []byte) (n int, err error) {
 	return n - len(m.id), nil
 }
 
+func (m *demuxClient) Write(b []byte) (n int, err error) {
+	// Use a fresh buffer to avoid mutating m.id's underlying array if it has
+	// extra capacity (append may reuse the slice backing array).
+	buf := make([]byte, len(m.id)+len(b))
+	copy(buf, m.id)
+	copy(buf[len(m.id):], b)
+	n, err = m.Conn.Write(buf)
+	if err != nil {
+		return 0, err
+	}
+	if n < len(m.id) {
+		return 0, io.ErrShortWrite
+	}
+	return n - len(m.id), nil
+}
+
 func (m *demuxClient) ID() []byte { return m.id }
+func (m *demuxClient) LocalAddr() net.Addr {
+	return &demuxVirtualAddr{Addr: m.Conn.LocalAddr(), id: m.id}
+}

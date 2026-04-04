@@ -17,8 +17,8 @@ func newAESPair(t *testing.T) (client net.Conn, server net.Conn) {
 	cr, sr := net.Pipe()
 	t.Cleanup(func() { _ = cr.Close(); _ = sr.Close() })
 
-	fc := netx.NewFramedConn(cr)
-	fs := netx.NewFramedConn(sr)
+	fc := netx.NewFrameConn(cr)
+	fs := netx.NewFrameConn(sr)
 
 	key := bytes.Repeat([]byte{0x42}, 32)
 
@@ -135,48 +135,21 @@ func TestAESGCM_ShortBufferDropsPacket(t *testing.T) {
 }
 
 func TestAESGCM_MaxPacketWrite(t *testing.T) {
-	// choose a small max packet size so writes exceed it
-	// Overhead is 8 (seq) + 16 (GCM) + len(plaintext)
-	// set max to 48; max plaintext allowed ~= 24
-	cr, sr := net.Pipe()
-	t.Cleanup(func() { _ = cr.Close(); _ = sr.Close() })
-	fc := netx.NewFramedConn(cr)
-	fs := netx.NewFramedConn(sr)
-	key := bytes.Repeat([]byte{0x42}, 32)
-	var (
-		c    net.Conn
-		ec   error
-		es   error
-		done = make(chan struct{}, 2)
-	)
-	go func() {
-		c, ec = aesgcmproto.NewAESGCMConn(fc, key, aesgcmproto.WithAESGCMMaxPacket(48))
-		done <- struct{}{}
-	}()
-	go func() {
-		_, es = aesgcmproto.NewAESGCMConn(fs, key, aesgcmproto.WithAESGCMMaxPacket(48))
-		done <- struct{}{}
-	}()
-	<-done
-	<-done
-	if ec != nil {
-		t.Fatalf("client: %v", ec)
-	}
-	if es != nil {
-		t.Fatalf("server: %v", es)
-	}
+	// Overhead is 8 (seq) + 16 (GCM tag); max plaintext = 65536 - 24 = 65512.
+	// Writing 65513 bytes must be rejected without hitting the wire.
+	c, _ := newAESPair(t)
 
-	big := bytes.Repeat([]byte("b"), 64)
-	if _, err := c.Write(big); err == nil {
-		t.Fatalf("expected write error due to max packet size")
+	tooBig := bytes.Repeat([]byte("b"), 65513)
+	if _, err := c.Write(tooBig); err == nil {
+		t.Fatalf("expected write error for oversized packet")
 	}
 }
 
 func TestAESGCM_DecryptErrorWrongKey(t *testing.T) {
 	cr, sr := net.Pipe()
 	t.Cleanup(func() { _ = cr.Close(); _ = sr.Close() })
-	fc := netx.NewFramedConn(cr)
-	fs := netx.NewFramedConn(sr)
+	fc := netx.NewFrameConn(cr)
+	fs := netx.NewFrameConn(sr)
 
 	keyA := bytes.Repeat([]byte{0x11}, 32)
 	keyB := bytes.Repeat([]byte{0x22}, 32)

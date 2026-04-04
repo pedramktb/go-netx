@@ -313,3 +313,161 @@ func TestPollConn_SmallReadBuffer(t *testing.T) {
 		t.Errorf("Expected %q, got %q", msg, result)
 	}
 }
+
+// --- PollConn + PollServerConn integration tests over net.Pipe ---
+// These tests use a real net.Pipe (stream, no message boundaries) together with
+// FrameConn to preserve message boundaries, paired with PollServerConn so that
+// the server properly handles empty polls and sends data back to the client.
+
+func newPollPair(t *testing.T, opts ...netx.PollConnOption) (client net.Conn, server net.Conn) {
+	t.Helper()
+	rawClient, rawServer := net.Pipe()
+	// Wrap both sides in FrameConn to give message-boundary semantics over the stream,
+	// then in PollConn / PollServerConn for the request-response protocol.
+	client = netx.NewPollConn(netx.NewFrameConn(rawClient), opts...)
+	server = netx.NewPollServerConn(netx.NewFrameConn(rawServer), opts...)
+	t.Cleanup(func() { client.Close(); server.Close() })
+	return client, server
+}
+
+func TestPollServerConn_Echo(t *testing.T) {
+	client, server := newPollPair(t, netx.WithPollInterval(10*time.Millisecond))
+
+	msg := []byte("hello from client")
+
+	// Server: read the message and echo it back.
+	go func() {
+		buf := make([]byte, 1024)
+		n, err := server.Read(buf)
+		if err != nil {
+			return
+		}
+		_, _ = server.Write(buf[:n])
+	}()
+
+	if _, err := client.Write(msg); err != nil {
+		t.Fatalf("client Write: %v", err)
+	}
+
+	buf := make([]byte, 1024)
+	_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, err := client.Read(buf)
+	if err != nil {
+		t.Fatalf("client Read: %v", err)
+	}
+	if !bytes.Equal(buf[:n], msg) {
+		t.Errorf("echo: expected %q, got %q", msg, buf[:n])
+	}
+}
+
+func TestPollServerConn_ServerInitiated(t *testing.T) {
+	client, server := newPollPair(t, netx.WithPollInterval(10*time.Millisecond))
+
+	serverMsg := []byte("server push")
+
+	// Server: write data without waiting for a client message.
+	go func() {
+		time.Sleep(15 * time.Millisecond) // let the poll loop start
+		_, _ = server.Write(serverMsg)
+	}()
+
+	buf := make([]byte, 1024)
+	_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, err := client.Read(buf)
+	if err != nil {
+		t.Fatalf("client Read: %v", err)
+	}
+	if !bytes.Equal(buf[:n], serverMsg) {
+		t.Errorf("server push: expected %q, got %q", serverMsg, buf[:n])
+	}
+}
+
+func TestPollServerConn_BidirectionalExchange(t *testing.T) {
+	client, server := newPollPair(t, netx.WithPollInterval(10*time.Millisecond))
+
+	const rounds = 5
+	done := make(chan struct{})
+
+	// Server: echo loop.
+	go func() {
+		defer close(done)
+		buf := make([]byte, 1024)
+		for i := 0; i < rounds; i++ {
+			_ = server.SetReadDeadline(time.Now().Add(2 * time.Second))
+			n, err := server.Read(buf)
+			if err != nil {
+				return
+			}
+			_, _ = server.Write(buf[:n])
+		}
+	}()
+
+	buf := make([]byte, 1024)
+	for i := 0; i < rounds; i++ {
+		msg := []byte("round")
+		if _, err := client.Write(msg); err != nil {
+			t.Fatalf("round %d Write: %v", i, err)
+		}
+		_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
+		n, err := client.Read(buf)
+		if err != nil {
+			t.Fatalf("round %d Read: %v", i, err)
+		}
+		if !bytes.Equal(buf[:n], msg) {
+			t.Errorf("round %d: expected %q, got %q", i, msg, buf[:n])
+		}
+	}
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("server echo loop timed out")
+	}
+}
+
+func TestPollServerConn_ClosePropagatesToClient(t *testing.T) {
+	client, server := newPollPair(t, netx.WithPollInterval(10*time.Millisecond))
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		server.Close()
+	}()
+
+	buf := make([]byte, 1024)
+	_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, err := client.Read(buf)
+	if err == nil {
+		t.Error("expected error after server close, got nil")
+	}
+}
+
+// TestPollServerConn_IdleTimeout verifies that WithPollTimeout causes the server
+// connection to close when the client stops polling. This replicates the WireGuard
+// reconnect scenario: the underlying transport (demux session) stays open but the
+// poll client goes silent; the server must detect this and tear down the old virtual
+// session so that the reconnecting client gets a fresh one.
+func TestPollServerConn_IdleTimeout(t *testing.T) {
+	rawClient, rawServer := net.Pipe()
+	defer rawClient.Close()
+
+	const timeout = 50 * time.Millisecond
+	server := netx.NewPollServerConn(rawServer, netx.WithPollTimeout(timeout))
+	defer server.Close()
+
+	// rawClient is held open (live connection) but sends nothing, simulating a
+	// peer that has stopped polling while the transport layer stays up.
+
+	buf := make([]byte, 64)
+	start := time.Now()
+	// Give the test a generous outer deadline to avoid hanging on regressions.
+	_ = server.SetReadDeadline(time.Now().Add(10 * timeout))
+	_, err := server.Read(buf)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Error("expected error from server after idle timeout, got nil")
+	}
+	if elapsed > 5*timeout {
+		t.Errorf("server took too long to detect idle: %v (timeout=%v)", elapsed, timeout)
+	}
+}

@@ -1,10 +1,10 @@
 /*
-FramedConn is a network layer that adds a length-prefixed framing protocol inside a stream-oriented
+FrameConn is a network layer that adds a length-prefixed framing protocol inside a stream-oriented
 connection (like TCP). This allows wrapping packet-based connections inside stream ones (e.g.
 UDP over TCP+TLS), preserving message boundaries. Each frame consists of a 4-byte big-endian
 length header followed by the payload.
 
-Since FramedConn performs two writes per frame (one for the header and one for the payload),
+Since FrameConn performs two writes per frame (one for the header and one for the payload),
 it is highly recommended to wrap the underlying connection in a BufferedConn. This coalesces
 the writes into a single system call, significantly improving performance.
 */
@@ -13,34 +13,22 @@ package netx
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"net"
-	"strconv"
 	"sync"
 )
 
 func init() {
-	Register("framed", func(params map[string]string, listener bool) (Wrapper, error) {
-		opts := []FramedConnOption{}
-		for key, value := range params {
-			switch key {
-			case "maxsize":
-				maxSize, err := strconv.ParseUint(value, 10, 16)
-				if err != nil {
-					return Wrapper{}, fmt.Errorf("uri: invalid framed maxsize parameter %q: %w", value, err)
-				}
-				opts = append(opts, WithMaxFrameSize(uint16(maxSize)))
-			default:
-				return Wrapper{}, fmt.Errorf("uri: unknown framed parameter %q", key)
-			}
+	Register("frame", func(params map[string]string, listener bool) (Wrapper, error) {
+		for key := range params {
+			return Wrapper{}, fmt.Errorf("uri: unknown frame parameter %q", key)
 		}
 		connToConn := func(c net.Conn) (net.Conn, error) {
-			return NewFramedConn(c, opts...), nil
+			return NewFrameConn(c), nil
 		}
 		return Wrapper{
-			Name:   "framed",
+			Name:   "frame",
 			Params: params,
 			ListenerToListener: func(l net.Listener) (net.Listener, error) {
 				return ConnWrapListener(l, connToConn)
@@ -53,40 +41,24 @@ func init() {
 	})
 }
 
-var ErrFrameTooLarge = errors.New("framedConn: frame too large")
-
-type framedConn struct {
+type frameConn struct {
 	net.Conn
-	maxFrameSize int
-	pending      []byte
-	rmu, wmu     sync.Mutex
+	pending  []byte
+	buf      []byte
+	rmu, wmu sync.Mutex
 }
 
-type FramedConnOption func(*framedConn)
-
-func WithMaxFrameSize(size uint16) FramedConnOption {
-	return func(c *framedConn) {
-		c.maxFrameSize = int(size)
-	}
-}
-
-// NewFramedConn wraps a net.Conn with a simple length-prefixed framing protocol.
+// NewFrameConn wraps a net.Conn with a simple length-prefixed framing protocol.
 // Each frame is prefixed with a 4-byte big-endian unsigned integer indicating the length of the frame.
-// If the frame size exceeds maxFrameSize, Read will return ErrFrameTooLarge.
-// The default maxFrameSize is 4KB.
-func NewFramedConn(c net.Conn, opts ...FramedConnOption) net.Conn {
-	fc := &framedConn{
-		Conn:         c,
-		maxFrameSize: 4096,
+func NewFrameConn(c net.Conn) net.Conn {
+	return &frameConn{
+		Conn: c,
+		buf:  make([]byte, MaxPacketSize),
 	}
-	for _, opt := range opts {
-		opt(fc)
-	}
-	return fc
 }
 
 // Read returns at most one frame's bytes; large frames are delivered across multiple Reads.
-func (c *framedConn) Read(p []byte) (int, error) {
+func (c *frameConn) Read(p []byte) (int, error) {
 	c.rmu.Lock()
 	defer c.rmu.Unlock()
 
@@ -101,30 +73,21 @@ func (c *framedConn) Read(p []byte) (int, error) {
 		return 0, err
 	}
 	n := int(binary.BigEndian.Uint16(hdr[:]))
-	if n > c.maxFrameSize {
-		return 0, ErrFrameTooLarge
-	}
-	if n == 0 {
-		// Deliver empty frame as a zero-length read to allow keep-alives.
-		return 0, nil
-	}
-
 	if len(p) >= n {
 		_, err := io.ReadFull(c.Conn, p[:n])
 		return n, err
 	}
 
-	buf := make([]byte, n)
-	if _, err := io.ReadFull(c.Conn, buf); err != nil {
+	if _, err := io.ReadFull(c.Conn, c.buf[:n]); err != nil {
 		return 0, err
 	}
-	w := copy(p, buf)
-	c.pending = buf[w:]
+	w := copy(p, c.buf[:n])
+	c.pending = c.buf[w:n]
 	return w, nil
 }
 
 // Write sends p as a single frame.
-func (c *framedConn) Write(p []byte) (int, error) {
+func (c *frameConn) Write(p []byte) (int, error) {
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
 

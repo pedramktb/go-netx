@@ -3,7 +3,6 @@ package netx_test
 import (
 	"bytes"
 	"errors"
-	"io"
 	"net"
 	"sync"
 	"testing"
@@ -44,12 +43,19 @@ func TestMux_SingleConnection(t *testing.T) {
 	}()
 
 	buf := make([]byte, 256)
-	n, err := lc.Read(buf)
+	var tag any
+	n, err := lc.ReadTagged(buf, &tag)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
 	if !bytes.Equal(buf[:n], msg) {
 		t.Fatalf("got %q, want %q", buf[:n], msg)
+	}
+	if tag == nil {
+		t.Fatal("expected non-nil tag")
+	}
+	if _, ok := tag.(net.Conn); !ok {
+		t.Fatalf("tag is %T, want net.Conn", tag)
 	}
 }
 
@@ -62,10 +68,8 @@ func TestMux_WriteBack(t *testing.T) {
 	response := []byte("pong")
 
 	var wg sync.WaitGroup
-	wg.Add(1)
 
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		c, err := net.Dial("tcp", ln.Addr().String())
 		if err != nil {
 			t.Errorf("dial: %v", err)
@@ -87,18 +91,19 @@ func TestMux_WriteBack(t *testing.T) {
 		if !bytes.Equal(buf[:n], response) {
 			t.Errorf("response: got %q, want %q", buf[:n], response)
 		}
-	}()
+	})
 
-	// Server side: read request, write response
+	// Server side: read request, write response back on the same underlying conn.
 	buf := make([]byte, 256)
-	n, err := lc.Read(buf)
+	var tag any
+	n, err := lc.ReadTagged(buf, &tag)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
 	if !bytes.Equal(buf[:n], request) {
 		t.Fatalf("request: got %q, want %q", buf[:n], request)
 	}
-	if _, err := lc.Write(response); err != nil {
+	if _, err := lc.WriteTagged(response, tag); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
@@ -124,20 +129,79 @@ func TestMux_MultipleConnections(t *testing.T) {
 				c.Close()
 				return
 			}
-			c.Close() // close each connection so the adapter transitions
+			c.Close()
 		}
 	}()
 
-	for _, want := range messages {
+	seen := make(map[string]bool)
+	for range messages {
 		buf := make([]byte, 256)
-		n, err := lc.Read(buf)
+		var tag any
+		n, err := lc.ReadTagged(buf, &tag)
 		if err != nil {
 			t.Fatalf("read: %v", err)
 		}
-		if string(buf[:n]) != want {
-			t.Fatalf("got %q, want %q", buf[:n], want)
+		seen[string(buf[:n])] = true
+	}
+	for _, want := range messages {
+		if !seen[want] {
+			t.Fatalf("message %q not received", want)
 		}
 	}
+}
+
+func TestMux_ConcurrentConnections(t *testing.T) {
+	// Multiple connections may be open simultaneously; each write must arrive
+	// on the same connection the read came from.
+	ln := tcpListener(t)
+	lc := netx.NewMux(ln)
+	defer lc.Close()
+
+	const n = 4
+	var wg sync.WaitGroup
+	wg.Add(n)
+
+	for i := range n {
+		payload := []byte{byte('A' + i)}
+		go func(payload []byte) {
+			defer wg.Done()
+			c, err := net.Dial("tcp", ln.Addr().String())
+			if err != nil {
+				t.Errorf("dial: %v", err)
+				return
+			}
+			defer c.Close()
+			if _, err := c.Write(payload); err != nil {
+				t.Errorf("write: %v", err)
+				return
+			}
+			buf := make([]byte, 8)
+			nn, err := c.Read(buf)
+			if err != nil {
+				t.Errorf("read response: %v", err)
+				return
+			}
+			if !bytes.Equal(buf[:nn], bytes.ToLower(payload)) {
+				t.Errorf("got %q, want %q", buf[:nn], bytes.ToLower(payload))
+			}
+		}(payload)
+	}
+
+	// Server: echo lowercased back on the exact source connection.
+	for i := range n {
+		buf := make([]byte, 256)
+		var tag any
+		nn, err := lc.ReadTagged(buf, &tag)
+		if err != nil {
+			t.Fatalf("ReadTagged %d: %v", i, err)
+		}
+		resp := bytes.ToLower(buf[:nn])
+		if _, err := lc.WriteTagged(resp, tag); err != nil {
+			t.Fatalf("WriteTagged %d: %v", i, err)
+		}
+	}
+
+	wg.Wait()
 }
 
 func TestMux_RequestResponseAcrossConnections(t *testing.T) {
@@ -150,7 +214,7 @@ func TestMux_RequestResponseAcrossConnections(t *testing.T) {
 	wg.Add(rounds)
 
 	go func() {
-		for i := 0; i < rounds; i++ {
+		for i := range rounds {
 			c, err := net.Dial("tcp", ln.Addr().String())
 			if err != nil {
 				t.Errorf("dial %d: %v", i, err)
@@ -182,14 +246,15 @@ func TestMux_RequestResponseAcrossConnections(t *testing.T) {
 		}
 	}()
 
-	for i := 0; i < rounds; i++ {
+	for i := range rounds {
 		buf := make([]byte, 256)
-		n, err := lc.Read(buf)
+		var tag any
+		n, err := lc.ReadTagged(buf, &tag)
 		if err != nil {
 			t.Fatalf("read %d: %v", i, err)
 		}
 		resp := bytes.ToLower(buf[:n])
-		if _, err := lc.Write(resp); err != nil {
+		if _, err := lc.WriteTagged(resp, tag); err != nil {
 			t.Fatalf("write %d: %v", i, err)
 		}
 	}
@@ -207,13 +272,14 @@ func TestMux_Close(t *testing.T) {
 
 	// Read after close should return error
 	buf := make([]byte, 256)
-	_, err := lc.Read(buf)
+	var tag any
+	_, err := lc.ReadTagged(buf, &tag)
 	if err == nil {
 		t.Fatal("expected error on read after close")
 	}
 
 	// Write after close should return error
-	_, err = lc.Write([]byte("data"))
+	_, err = lc.WriteTagged([]byte("data"), nil)
 	if err == nil {
 		t.Fatal("expected error on write after close")
 	}
@@ -224,15 +290,19 @@ func TestMux_Close(t *testing.T) {
 	}
 }
 
-func TestMux_WriteBeforeRead(t *testing.T) {
+func TestMux_WriteInvalidTag(t *testing.T) {
 	ln := tcpListener(t)
 	lc := netx.NewMux(ln)
 	defer lc.Close()
 
-	// Write without a current connection should return an error
-	_, err := lc.Write([]byte("data"))
-	if err != io.ErrClosedPipe {
-		t.Fatalf("expected io.ErrClosedPipe, got %v", err)
+	// WriteTagged with a nil or non-net.Conn tag should return an error.
+	_, err := lc.WriteTagged([]byte("data"), nil)
+	if err == nil {
+		t.Fatal("expected error on WriteTagged with nil tag")
+	}
+	_, err = lc.WriteTagged([]byte("data"), "not-a-conn")
+	if err == nil {
+		t.Fatal("expected error on WriteTagged with wrong tag type")
 	}
 }
 
@@ -251,26 +321,15 @@ func TestMux_Deadlines(t *testing.T) {
 	lc := netx.NewMux(ln)
 	defer lc.Close()
 
-	// Set a very short read deadline before any connection exists
+	// Set a very short read deadline before any connection exists.
 	if err := lc.SetReadDeadline(time.Now().Add(50 * time.Millisecond)); err != nil {
 		t.Fatalf("SetReadDeadline: %v", err)
 	}
 
-	// Dial so Accept succeeds and the deadline propagates to the new conn
-	go func() {
-		c, err := net.Dial("tcp", ln.Addr().String())
-		if err != nil {
-			return
-		}
-		defer c.Close()
-		// Hold connection open so the read blocks until deadline
-		time.Sleep(2 * time.Second)
-	}()
-
 	buf := make([]byte, 256)
-	// The first Read call will Accept a new connection (applying the deadline) and then
-	// try to read from it. Because the client never sends data, this should time out.
-	_, err := lc.Read(buf)
+	var tag any
+	// No connection is dialled — ReadTagged should time out via the mux-level deadline.
+	_, err := lc.ReadTagged(buf, &tag)
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}

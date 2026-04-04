@@ -7,9 +7,7 @@ import (
 	"strings"
 )
 
-type ListenerURI struct {
-	URI
-}
+type ListenerURI struct{ URI }
 
 func (u ListenerURI) Listen(ctx context.Context, opts ...ListenOption) (net.Listener, error) {
 	return ListenerScheme{u.Scheme}.Listen(ctx, u.Addr, opts...)
@@ -19,9 +17,7 @@ func (u *ListenerURI) UnmarshalText(text []byte) error {
 	return u.URI.UnmarshalText(text, true)
 }
 
-type DialerURI struct {
-	URI
-}
+type DialerURI struct{ URI }
 
 func (u DialerURI) Dial(ctx context.Context, opts ...DialOption) (net.Conn, error) {
 	return DialerScheme{u.Scheme}.Dial(ctx, u.Addr, opts...)

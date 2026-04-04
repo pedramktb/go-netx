@@ -19,8 +19,11 @@ type Tun struct {
 	closing    atomic.Bool
 }
 
-// Relay copies data between the two connections until
+// Relay copies data between the two connections until either side encounters an error or is closed.
 func (t *Tun) Relay(ctx context.Context) {
+	if t.Conn == nil || t.Peer == nil {
+		return
+	}
 	if t.Logger == nil {
 		t.Logger = slog.Default()
 	}
@@ -34,10 +37,10 @@ func (t *Tun) Relay(ctx context.Context) {
 	sendErr := <-sendErrCh
 	recvErr := <-recvErrCh
 	if sendErr != nil {
-		t.Logger.ErrorContext(ctx, "error copying data from peer to tun", "error", sendErr.Error())
+		t.Logger.ErrorContext(ctx, "error copying data from peer to tun", "error", sendErr)
 	}
 	if recvErr != nil {
-		t.Logger.ErrorContext(ctx, "error copying data from tun to peer", "error", recvErr.Error())
+		t.Logger.ErrorContext(ctx, "error copying data from tun to peer", "error", recvErr)
 	}
 }
 
@@ -75,9 +78,7 @@ type TunHandler func(ctx context.Context, conn net.Conn) (matched bool, connCtx 
 // TunMaster initially accepts no connections, since there are no known tunnel handlers.
 // It's the duty of the caller to add tunnel handlers via SetHandler.
 // The generic ID type is used to identify different tunnel handlers, e.g. by a client ID or username.
-type TunMaster[ID comparable] struct {
-	Server[ID]
-}
+type TunMaster[ID comparable] struct{ Server[ID] }
 
 // SetRoute sets a tunnel handler for a specific ID.
 // If a handler already exists for this ID, it will be replaced.

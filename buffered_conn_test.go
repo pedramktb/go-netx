@@ -57,8 +57,8 @@ func TestBufConnCustomSizes(t *testing.T) {
 	clientRaw, serverRaw := net.Pipe()
 	t.Cleanup(func() { _ = clientRaw.Close(); _ = serverRaw.Close() })
 
-	c := netx.NewBufConn(clientRaw, netx.WithBufReaderSize(128), netx.WithBufWriterSize(256))
-	s := netx.NewBufConn(serverRaw, netx.WithBufReaderSize(128), netx.WithBufWriterSize(256))
+	c := netx.NewBufConn(clientRaw, netx.WithBufRead(128), netx.WithBufWrite(256))
+	s := netx.NewBufConn(serverRaw, netx.WithBufRead(128), netx.WithBufWrite(256))
 
 	// roundtrip
 	data := bytes.Repeat([]byte("a"), 1024)

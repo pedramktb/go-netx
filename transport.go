@@ -14,9 +14,7 @@ const (
 
 type Transport string
 
-type ListenerTransport struct {
-	Transport
-}
+type ListenerTransport struct{ Transport }
 
 func (t *ListenerTransport) Listen(ctx context.Context, addr string, opts ...ListenOption) (net.Listener, error) {
 	return Listen(ctx, t.String(), addr, opts...)
@@ -26,9 +24,7 @@ func (t *ListenerTransport) UnmarshalText(text []byte) error {
 	return t.Transport.UnmarshalText(text, true)
 }
 
-type DialerTransport struct {
-	Transport
-}
+type DialerTransport struct{ Transport }
 
 func (t *DialerTransport) Dial(ctx context.Context, addr string, opts ...DialOption) (net.Conn, error) {
 	return Dial(ctx, t.String(), addr, opts...)
