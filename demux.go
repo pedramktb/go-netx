@@ -55,6 +55,9 @@ func init() {
 				return Wrapper{}, fmt.Errorf("uri: unknown demux parameter %q", key)
 			}
 		}
+		if len(id) == 0 {
+			return Wrapper{}, fmt.Errorf("uri: demux requires an id parameter to determine session ID length")
+		}
 		if listener {
 			return Wrapper{
 				Name:     "demux",

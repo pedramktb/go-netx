@@ -117,8 +117,8 @@ func TestSplitConn_SmallWritePassthrough(t *testing.T) {
 	}
 }
 
-func TestSplitConn_NoMaxWritePassthrough(t *testing.T) {
-	// A plain net.Conn with no MaxWrite — NewSplitConn should return it unchanged.
+func TestSplitConn_NoMaxWriteError(t *testing.T) {
+	// A plain net.Conn with no MaxWrite — NewSplitConn should return an error.
 	clientRaw, serverRaw := net.Pipe()
 	t.Cleanup(func() { _ = clientRaw.Close(); _ = serverRaw.Close() })
 

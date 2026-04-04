@@ -135,10 +135,13 @@ Notes:
 
 ```go
 // Server: multiplex sessions over a single conn
-sessListener := netx.NewDemux(conn, 4, // 4-byte session ID
-	netx.WithDemuxSessQueueSize(16),
-	netx.WithDemuxAccQueueSize(8),
+sessListener, err := netx.NewDemux(conn, 4, // 4-byte session ID
+	netx.WithDemuxReadQueue(16),
+	netx.WithDemuxAccQueue(8),
 )
+if err != nil {
+	log.Fatal(err)
+}
 defer sessListener.Close()
 
 for {
@@ -157,10 +160,8 @@ Options:
 
 | Option | Default | Purpose |
 |---|---|---|
-| `WithDemuxAccQueueSize(uint16)` | 0 (unbuffered) | Accept queue capacity |
-| `WithDemuxSessQueueSize(uint16)` | 8 | Per-session read queue depth |
-| `WithDemuxBufSize(uint16)` | 4096 | Underlying read buffer size |
-| `WithDemuxClientBufSize(uint16)` | 4096 | Client read/write buffer size |
+| `WithDemuxAccQueue(uint16)` | 1 | Accept queue capacity |
+| `WithDemuxReadQueue(uint16)` | 128 | Per-session read queue depth |
 
 ### Poll connections
 
@@ -411,7 +412,7 @@ netx tun \
 
 # Example: DNS tunnel server
 netx tun \
-	--from udp+dnst{domain=t.example.com}+demux{id=0000,sessqueuesize=16}://:53 \
+	--from udp+dnst{domain=t.example.com}+demux{id=0000,rq=16}://:53 \
 	--to tcp://internal-service:8080
 ```
 
@@ -442,7 +443,7 @@ Chains use the form `<transport>+<wrapper1>+<wrapper2>+...://host:port` where `<
 - `mux` - Collapse a listener into a single `net.Conn` (server) or auto-reconnecting dialer into a `net.Conn` (client)
 
 - `demux` - Session multiplexer over a single conn
-	- Params: `id` (hex, required for client), `accq` (accept queue size, optional, default: 0), `sessq` (session queue size, optional, default: 8)
+	- Params: `id` (hex, required for client), `accq` (accept queue size, optional, default: 1), `rq` (session read queue size, optional, default: 128)
 
 - `dnst` - DNS tunnel encoding (Base32 in TXT queries/responses)
 	- Params: `domain` (required)

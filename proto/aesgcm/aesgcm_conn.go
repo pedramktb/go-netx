@@ -63,7 +63,7 @@ func NewAESGCMConn(conn net.Conn, key []byte) (net.Conn, error) {
 	}
 	if mw, ok := conn.(interface{ MaxWrite() uint16 }); ok && mw.MaxWrite() != 0 {
 		if mw.MaxWrite() <= uint16(8+a.Overhead()) {
-			return nil, errors.New("demux: underlying connection's MaxWrite is too small")
+			return nil, errors.New("aesgcm: underlying connection's MaxWrite is too small")
 		}
 		agc.maxWrite = mw.MaxWrite() - uint16(8+a.Overhead())
 	}

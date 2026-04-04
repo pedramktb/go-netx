@@ -144,7 +144,9 @@ func (c *mux) acceptLoop() {
 		}
 		c.conns = nil
 		c.connMu.Unlock()
-		close(c.rQueue)
+		// Do not close rQueue here: readConn goroutines may still be running and
+		// sending to it, which would cause a panic on a closed channel.
+		// ReadTagged already handles termination via the doneCh select case.
 	}()
 
 	for {

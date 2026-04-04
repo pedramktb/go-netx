@@ -63,7 +63,12 @@ func (m *demuxClient) Read(b []byte) (n int, err error) {
 }
 
 func (m *demuxClient) Write(b []byte) (n int, err error) {
-	n, err = m.Conn.Write(append(m.id, b...))
+	// Use a fresh buffer to avoid mutating m.id's underlying array if it has
+	// extra capacity (append may reuse the slice backing array).
+	buf := make([]byte, len(m.id)+len(b))
+	copy(buf, m.id)
+	copy(buf[len(m.id):], b)
+	n, err = m.Conn.Write(buf)
 	if err != nil {
 		return 0, err
 	}

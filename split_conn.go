@@ -1,8 +1,8 @@
 /*
 SplitConn removes the MaxWrite limitation of an underlying net.Conn by splitting
 large writes into multiple smaller writes, each no larger than MaxWrite bytes.
-If the underlying connection does not expose a MaxWrite limitation the conn is
-returned as-is.
+If the underlying connection does not expose a MaxWrite limitation, or MaxWrite
+returns 0, NewSplitConn returns an error.
 */
 
 package netx
@@ -42,7 +42,7 @@ type splitConn struct {
 
 // NewSplitConn wraps c so that Write calls larger than c's MaxWrite limit are
 // transparently split into multiple smaller writes.
-// If c does not implement MaxWrite, or MaxWrite returns 0, c is returned unchanged.
+// If c does not implement MaxWrite, or MaxWrite returns 0, an error is returned.
 func NewSplitConn(c net.Conn) (net.Conn, error) {
 	mw, ok := c.(interface{ MaxWrite() uint16 })
 	if !ok || mw.MaxWrite() == 0 {
