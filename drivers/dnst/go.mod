@@ -3,8 +3,8 @@ module github.com/pedramktb/go-netx/drivers/dnst
 go 1.25.7
 
 require (
-	github.com/pedramktb/go-netx v1.3.0
-	github.com/pedramktb/go-netx/proto/dnst v1.0.0
+	github.com/pedramktb/go-netx v1.4.0
+	github.com/pedramktb/go-netx/proto/dnst v1.1.0
 )
 
 require (
