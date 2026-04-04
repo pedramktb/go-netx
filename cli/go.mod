@@ -5,14 +5,14 @@ go 1.25.7
 require (
 	github.com/miekg/dns v1.1.72
 	github.com/pedramktb/go-netx v1.4.0
-	github.com/pedramktb/go-netx/drivers/aesgcm v1.1.0
-	github.com/pedramktb/go-netx/drivers/dnst v1.1.0
-	github.com/pedramktb/go-netx/drivers/dtls v1.1.0
-	github.com/pedramktb/go-netx/drivers/dtlspsk v1.1.0
-	github.com/pedramktb/go-netx/drivers/ssh v1.1.0
-	github.com/pedramktb/go-netx/drivers/tls v1.1.0
-	github.com/pedramktb/go-netx/drivers/tlspsk v1.1.0
-	github.com/pedramktb/go-netx/drivers/utls v1.1.0
+	github.com/pedramktb/go-netx/drivers/aesgcm v1.1.1
+	github.com/pedramktb/go-netx/drivers/dnst v1.1.1
+	github.com/pedramktb/go-netx/drivers/dtls v1.1.1
+	github.com/pedramktb/go-netx/drivers/dtlspsk v1.1.1
+	github.com/pedramktb/go-netx/drivers/ssh v1.1.1
+	github.com/pedramktb/go-netx/drivers/tls v1.1.1
+	github.com/pedramktb/go-netx/drivers/tlspsk v1.1.1
+	github.com/pedramktb/go-netx/drivers/utls v1.1.1
 	github.com/spf13/cobra v1.10.2
 )
 
