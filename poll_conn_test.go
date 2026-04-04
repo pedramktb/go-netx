@@ -342,7 +342,7 @@ func TestPollServerConn_Echo(t *testing.T) {
 		if err != nil {
 			return
 		}
-		server.Write(buf[:n])
+		_, _ = server.Write(buf[:n])
 	}()
 
 	if _, err := client.Write(msg); err != nil {
@@ -368,7 +368,7 @@ func TestPollServerConn_ServerInitiated(t *testing.T) {
 	// Server: write data without waiting for a client message.
 	go func() {
 		time.Sleep(15 * time.Millisecond) // let the poll loop start
-		server.Write(serverMsg)
+		_, _ = server.Write(serverMsg)
 	}()
 
 	buf := make([]byte, 1024)
@@ -398,7 +398,7 @@ func TestPollServerConn_BidirectionalExchange(t *testing.T) {
 			if err != nil {
 				return
 			}
-			server.Write(buf[:n])
+			_, _ = server.Write(buf[:n])
 		}
 	}()
 

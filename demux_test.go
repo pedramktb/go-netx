@@ -189,48 +189,29 @@ func TestDemux_InvalidPacket(t *testing.T) {
 	}
 	defer l.Close()
 
-	// Send packet shorter than 4 bytes
-	go func() {
-		_, _ = clientConn.Write([]byte("123"))
-	}()
-
-	// Server readLoop should detect invalid packet and close connection
-	// We can detect this by checking if l.Accept() returns error or if serverConn is closed.
-	// Accept waits for connection. It won't return error unless demux is Closed manually or accQueue closed.
-	// demux.Close() closes accQueue.
-	// readLoop calls c.Close() then returns. It does NOT call m.Close()!
-	// Wait, if readLoop returns, the server stops processing. But `m` struct is not updated heavily.
-	// Does readLoop close accQueue? NO.
-	// So l.Accept() will block forever if readLoop exits?
-	// The implementation of readLoop:
-	/*
-		func (m *demux) readLoop(c net.Conn) {
-			defer c.Close()
-			// ...
-			if len(data) < m.idMask {
-				return
-			}
-			// ...
-		}
-	*/
-	// It just returns. c is closed.
-	// `demux` instance stays "open" logically, but `Accept` blocks on channel.
-	// This seems like a limitation/design choice. Demux assumes persistent connection.
-	// If connection dies, Demux basically dies silently for new accepts.
-
-	// BUT, we can check if serverConn is closed.
+	// Send packet shorter than 4 bytes — readLoop should ignore it and keep running.
+	_, _ = clientConn.Write([]byte("123"))
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Check if serverConn is closed. readLoop does defer c.Close().
-	// We can try to write to serverConn from client side. net.Pipe: Write to closed pipe returns error.
-	_, err = clientConn.Write([]byte("check"))
-	if err == nil {
-		t.Error("Expected serverConn to be closed after invalid packet, but Write succeeded")
-	} else if err != io.ErrClosedPipe {
-		// It might be io.ErrClosedPipe or similar
-		t.Logf("Got expected error: %v", err)
+	// The connection must still be alive: a valid packet sent afterward should
+	// be accepted as a new session.
+	dial := netx.NewDemuxClient(clientConn, []byte("test"))
+	mc, err := dial()
+	if err != nil {
+		t.Fatalf("DemuxClient dial after invalid packet: %v", err)
 	}
+	defer mc.Close()
+
+	go func() {
+		_, _ = mc.Write([]byte("hello"))
+	}()
+
+	sess, err := l.Accept()
+	if err != nil {
+		t.Fatalf("Accept after invalid packet: %v", err)
+	}
+	defer sess.Close()
 }
 
 func TestDemux_DroppedPackets(t *testing.T) {

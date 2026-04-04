@@ -129,7 +129,7 @@ func (c *serverConn) ReadTagged(b []byte, tag *any) (n int, err error) {
 
 		data, decErr := c.encoding.DecodeString(encoded)
 		if decErr != nil {
-			c.logger.DebugContext(context.Background(), "dnst: received DNS query with invalid encoding, skipping", "remoteAddr", "error", decErr, c.RemoteAddr().Network()+"://"+c.RemoteAddr().String())
+			c.logger.DebugContext(context.Background(), "dnst: received DNS query with invalid encoding, skipping", "error", decErr, "remoteAddr", c.RemoteAddr().Network()+"://"+c.RemoteAddr().String())
 			continue // skip packets with invalid encoding
 		}
 
@@ -200,6 +200,7 @@ func NewTaggedServerConn(conn netx.TaggedConn, domain string, opts ...ServerOpti
 	ds := &taggedServerConn{
 		conn: conn,
 		serverConnCore: serverConnCore{
+			logger:   slog.Default(),
 			encoding: base32.StdEncoding.WithPadding(base32.NoPadding),
 			domain:   strings.TrimSuffix(domain, ".") + ".",
 			maxWrite: 765,
@@ -231,7 +232,7 @@ func (c *taggedServerConn) ReadTagged(b []byte, tag *any) (n int, err error) {
 		var subTag any
 		n, err = c.conn.ReadTagged(buf, &subTag)
 		if err != nil {
-			c.logger.DebugContext(context.Background(), "dnst: error reading from connection", "remoteAddr", "error", err, c.RemoteAddr().Network()+"://"+c.RemoteAddr().String())
+			c.logger.DebugContext(context.Background(), "dnst: error reading from connection", "error", err, "remoteAddr", c.RemoteAddr().Network()+"://"+c.RemoteAddr().String())
 			c.buf.Put(bp)
 			return 0, err
 		}
