@@ -13,6 +13,11 @@ import (
 	"time"
 )
 
+type taggedDemuxPacket struct {
+	data []byte
+	tag  any
+}
+
 type taggedDemux struct {
 	bc       TaggedConn
 	mu       sync.Mutex
@@ -107,12 +112,9 @@ func (m *taggedDemux) processPacket(id, payload []byte, tag any) {
 	sess, exists := m.sessions[string(id)]
 	if !exists {
 		sess = &taggedDemuxSess{
-			demux: m,
-			id:    id,
-			rQueue: make(chan struct {
-				data []byte
-				tag  any
-			}, m.sessReadQueueSize),
+			demux:        m,
+			id:           id,
+			rQueue:       make(chan taggedDemuxPacket, m.sessReadQueueSize),
 			tagQueue:     make(chan any, m.sessReadQueueSize*2),
 			closed:       make(chan struct{}),
 			readDlNotify: make(chan struct{}),
@@ -128,10 +130,7 @@ func (m *taggedDemux) processPacket(id, payload []byte, tag any) {
 		}
 	}
 	select {
-	case sess.rQueue <- struct {
-		data []byte
-		tag  any
-	}{data: payload, tag: tag}:
+	case sess.rQueue <- taggedDemuxPacket{data: payload, tag: tag}:
 	default:
 		// If the session's read queue is full, drop the packet to avoid blocking the read loop.
 		m.logger.WarnContext(context.Background(), "demux: session read queue full, dropping packet", "id", hex.EncodeToString(id))
@@ -141,13 +140,10 @@ func (m *taggedDemux) processPacket(id, payload []byte, tag any) {
 func (m *taggedDemux) Addr() net.Addr { return m.bc.LocalAddr() }
 
 type taggedDemuxSess struct {
-	demux   *taggedDemux
-	id      []byte
-	closing atomic.Bool
-	rQueue  chan struct {
-		data []byte
-		tag  any
-	}
+	demux         *taggedDemux
+	id            []byte
+	closing       atomic.Bool
+	rQueue        chan taggedDemuxPacket
 	tagQueue      chan any
 	closed        chan struct{}
 	unread        []byte

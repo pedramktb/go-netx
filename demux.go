@@ -66,6 +66,9 @@ func init() {
 				TaggedToListener: func(tc TaggedConn) (net.Listener, error) {
 					return NewTaggedDemux(tc, uint8(len(id)), opts...)
 				},
+				ListenerToListener: func(ln net.Listener) (net.Listener, error) {
+					return NewDemuxListener(ln, uint8(len(id)), opts...), nil
+				},
 			}, nil
 		}
 		return Wrapper{
@@ -74,6 +77,9 @@ func init() {
 			Listener: false,
 			ConnToDialer: func(c net.Conn) (Dialer, error) {
 				return NewDemuxClient(c, id), nil
+			},
+			DialerToDialer: func(d Dialer) (Dialer, error) {
+				return NewDemuxDialer(d, id), nil
 			},
 		}, nil
 	})

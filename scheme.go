@@ -8,9 +8,7 @@ import (
 	"strings"
 )
 
-type ListenerScheme struct {
-	Scheme
-}
+type ListenerScheme struct{ Scheme }
 
 func (s ListenerScheme) Listen(ctx context.Context, addr string, opts ...ListenOption) (net.Listener, error) {
 	l, err := Listen(ctx, s.Transport.String(), addr, opts...)
@@ -31,9 +29,7 @@ func (s *ListenerScheme) UnmarshalText(text []byte) error {
 	return s.Scheme.UnmarshalText(text, true)
 }
 
-type DialerScheme struct {
-	Scheme
-}
+type DialerScheme struct{ Scheme }
 
 func (c DialerScheme) Dial(ctx context.Context, addr string, opts ...DialOption) (net.Conn, error) {
 	dial := func() (net.Conn, error) {

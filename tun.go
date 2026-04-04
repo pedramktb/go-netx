@@ -78,9 +78,7 @@ type TunHandler func(ctx context.Context, conn net.Conn) (matched bool, connCtx 
 // TunMaster initially accepts no connections, since there are no known tunnel handlers.
 // It's the duty of the caller to add tunnel handlers via SetHandler.
 // The generic ID type is used to identify different tunnel handlers, e.g. by a client ID or username.
-type TunMaster[ID comparable] struct {
-	Server[ID]
-}
+type TunMaster[ID comparable] struct{ Server[ID] }
 
 // SetRoute sets a tunnel handler for a specific ID.
 // If a handler already exists for this ID, it will be replaced.

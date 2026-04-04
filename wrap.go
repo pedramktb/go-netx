@@ -6,17 +6,13 @@ import (
 	"strings"
 )
 
-type ServerWrappers struct {
-	Wrappers
-}
+type ServerWrappers struct{ Wrappers }
 
 func (ls *ServerWrappers) UnmarshalText(text []byte) error {
 	return ls.Wrappers.UnmarshalText(text, true)
 }
 
-type ClientWrappers struct {
-	Wrappers
-}
+type ClientWrappers struct{ Wrappers }
 
 func (ls *ClientWrappers) UnmarshalText(text []byte) error {
 	return ls.Wrappers.UnmarshalText(text, false)
@@ -105,17 +101,13 @@ func (ws *Wrappers) UnmarshalText(text []byte, server bool) error {
 	return nil
 }
 
-type ListenerWrapper struct {
-	Wrapper
-}
+type ListenerWrapper struct{ Wrapper }
 
 func (ls *ListenerWrapper) UnmarshalText(text []byte) error {
 	return ls.Wrapper.UnmarshalText(text, true)
 }
 
-type DialerWrapper struct {
-	Wrapper
-}
+type DialerWrapper struct{ Wrapper }
 
 func (ls *DialerWrapper) UnmarshalText(text []byte) error {
 	return ls.Wrapper.UnmarshalText(text, false)
