@@ -30,7 +30,7 @@ tasks:
     desc: Build binaries and libraries
     vars:
       AARCH64_MINGW_CC:
-        sh: command -v aarch64-w64-mingw32-clang 2>/dev/null || find /opt/llvm-mingw -name "aarch64-w64-mingw32-clang" 2>/dev/null | head -1
+        sh: echo "${AARCH64_MINGW_CC:-$(command -v aarch64-w64-mingw32-clang 2>/dev/null || find /opt/llvm-mingw -name "aarch64-w64-mingw32-clang" 2>/dev/null | head -1)}"
     cmds:
       - mkdir -p build
       # Linux binaries
