@@ -17,6 +17,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: sudo apt update -y && sudo apt install -y gcc-x86-64-linux-gnu gcc-aarch64-linux-gnu gcc-mingw-w64-x86-64
+      - name: Install llvm-mingw for Windows ARM64 cross-compilation
+        env:
+          LLVM_MINGW_VERSION: "20260421"
+        run: |
+          wget -q "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_VERSION}/llvm-mingw-${LLVM_MINGW_VERSION}-msvcrt-ubuntu-22.04-x86_64.tar.xz"
+          sudo mkdir -p /opt/llvm-mingw
+          sudo tar -xf "llvm-mingw-${LLVM_MINGW_VERSION}-msvcrt-ubuntu-22.04-x86_64.tar.xz" -C /opt/llvm-mingw/
+          BINDIR=$(find /opt/llvm-mingw -name "aarch64-w64-mingw32-clang" | head -1 | xargs dirname)
+          if [ -z "$BINDIR" ]; then
+            echo "error: aarch64-w64-mingw32-clang not found after extracting llvm-mingw"
+            exit 1
+          fi
+          sudo ln -sf "$BINDIR"/aarch64-w64-mingw32-* /usr/local/bin/
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
