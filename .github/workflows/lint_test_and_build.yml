@@ -22,7 +22,7 @@ jobs:
           LLVM_MINGW_VERSION: "20260421"
         run: |
           wget -q "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_VERSION}/llvm-mingw-${LLVM_MINGW_VERSION}-msvcrt-x86_64.zip"
-          sudo unzip -q "llvm-mingw-${LLVM_MINGW_VERSION}-msvcrt-x86_64.zip" -d /opt/
+          sudo unzip -q "llvm-mingw-${LLVM_MINGW_VERSION}-msvcrt-x86_64.zip" -d /opt/llvm-mingw/
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
