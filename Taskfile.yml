@@ -28,9 +28,6 @@ tasks:
 
   build:
     desc: Build binaries and libraries
-    vars:
-      AARCH64_MINGW_CC:
-        sh: echo "${AARCH64_MINGW_CC:-$(command -v aarch64-w64-mingw32-clang 2>/dev/null || find /opt/llvm-mingw -name "aarch64-w64-mingw32-clang" 2>/dev/null | head -1)}"
     cmds:
       - mkdir -p build
       # Linux binaries
@@ -45,11 +42,12 @@ tasks:
       # Windows shared libraries
       - env GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc go build -buildmode=c-shared -o build/libnetx_windows_x64.dll cli/internal/lib/*.go
       - |-
-        if [ -z "{{.AARCH64_MINGW_CC}}" ]; then
+        CC="${AARCH64_MINGW_CC:-$(command -v aarch64-w64-mingw32-clang 2>/dev/null || find /opt/llvm-mingw -name 'aarch64-w64-mingw32-clang' 2>/dev/null | head -1)}"
+        if [ -z "$CC" ]; then
           echo "error: aarch64-w64-mingw32-clang not found; install llvm-mingw (Arch: llvm-mingw-w64-toolchain-msvcrt-bin, CI: see workflow)"
           exit 1
         fi
-        env GOOS=windows GOARCH=arm64 CGO_ENABLED=1 CC={{.AARCH64_MINGW_CC}} go build -buildmode=c-shared -o build/libnetx_windows_arm64.dll cli/internal/lib/*.go
+        env GOOS=windows GOARCH=arm64 CGO_ENABLED=1 CC="$CC" go build -buildmode=c-shared -o build/libnetx_windows_arm64.dll cli/internal/lib/*.go
       # macOS binaries
       - env GOOS=darwin GOARCH=amd64 go build -o build/netx_macos_x64 cli/cmd/netx/*.go
       - env GOOS=darwin GOARCH=arm64 go build -o build/netx_macos_arm64 cli/cmd/netx/*.go
