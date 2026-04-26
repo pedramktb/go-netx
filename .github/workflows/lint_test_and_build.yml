@@ -18,12 +18,12 @@ jobs:
     steps:
       - run: sudo apt update -y && sudo apt install -y gcc-x86-64-linux-gnu gcc-aarch64-linux-gnu gcc-mingw-w64-x86-64
       - name: Install llvm-mingw for Windows ARM64 cross-compilation
+        env:
+          LLVM_MINGW_VERSION: "20260421"
         run: |
-          LLVM_MINGW_VERSION=20250114
-          UBUNTU_VERSION=$(lsb_release -rs)
-          wget -q "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_VERSION}/llvm-mingw-${LLVM_MINGW_VERSION}-msvcrt-ubuntu-${UBUNTU_VERSION}-x86_64.tar.xz"
-          sudo tar -xJf "llvm-mingw-${LLVM_MINGW_VERSION}-msvcrt-ubuntu-${UBUNTU_VERSION}-x86_64.tar.xz" -C /opt/
-          echo "/opt/llvm-mingw-${LLVM_MINGW_VERSION}-msvcrt-ubuntu-${UBUNTU_VERSION}-x86_64/bin" >> $GITHUB_PATH
+          wget -q "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_VERSION}/llvm-mingw-${LLVM_MINGW_VERSION}-msvcrt-x86_64.zip"
+          sudo unzip -q "llvm-mingw-${LLVM_MINGW_VERSION}-msvcrt-x86_64.zip" -d /opt/
+          echo "/opt/llvm-mingw-${LLVM_MINGW_VERSION}-msvcrt-x86_64/bin" >> $GITHUB_PATH
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
