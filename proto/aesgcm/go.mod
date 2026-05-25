@@ -6,6 +6,6 @@ require github.com/pedramktb/go-netx v1.4.0
 
 require (
 	github.com/pion/transport/v3 v3.1.1 // indirect
-	golang.org/x/net v0.52.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 )
