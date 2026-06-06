@@ -48,10 +48,15 @@ func init() {
 				return netx.Wrapper{}, fmt.Errorf("uri: invalid dtls certificate: %w", err)
 			}
 			cfg.Certificates = []tls.Certificate{certificate}
+			certSum := sha256.Sum256(certificate.Certificate[0])
 			return netx.Wrapper{
 				Name:     "dtls",
 				Params:   params,
 				Listener: listener,
+				SecretParams: []netx.SecretParam{{
+					Name:        "key",
+					Fingerprint: "sha256=" + colonHex(certSum[:8]),
+				}},
 				ListenerToListener: func(l net.Listener) (net.Listener, error) {
 					return dtls.NewListener(dtlsnet.PacketListenerFromListener(l), cfg)
 				},
@@ -87,6 +92,19 @@ func init() {
 				}}, nil
 		}
 	})
+}
+
+// colonHex formats b as colon-separated hex pairs (e.g. "ab:cd:ef").
+func colonHex(b []byte) string {
+	const hexdigits = "0123456789abcdef"
+	out := make([]byte, 0, len(b)*3-1)
+	for i, x := range b {
+		if i > 0 {
+			out = append(out, ':')
+		}
+		out = append(out, hexdigits[x>>4], hexdigits[x&0x0f])
+	}
+	return string(out)
 }
 
 func spkiVerifier(certPEM []byte) (func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error, error) {

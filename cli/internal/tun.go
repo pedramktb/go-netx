@@ -70,15 +70,6 @@ func runTun(ctx context.Context, cancel context.CancelFunc, from, to string) err
 	}
 	defer ln.Close()
 
-	// NETX_READY is a stable, secret-free "listener bound" marker emitted the
-	// instant the listener is bound — the socket is already accepting and buffering
-	// datagrams here, before Serve runs, so a packet arriving right after it is not
-	// dropped. The c-shared library forwards slog output to the embedding process,
-	// which latches on this token to start forwarding the moment the relay is ready
-	// instead of waiting out a fixed startup timeout. It is an external contract:
-	// keep the token bare and its attributes secret-free.
-	slog.Info("NETX_READY", "listen", ln.Addr().String())
-
 	tm := netx.TunMaster[struct{}]{}
 
 	tm.SetRoute(struct{}{}, func(ctx context.Context, conn net.Conn) (bool, context.Context, netx.Tun) {
@@ -99,10 +90,12 @@ func runTun(ctx context.Context, cancel context.CancelFunc, from, to string) err
 		}
 	}()
 
-	// from/to carry the full URI scheme, which on the listener side can include
-	// private key material (e.g. key=<hex>); log it only at debug so the default
-	// info stream forwarded to embedders stays secret-free.
-	slog.Debug("netx tun started", "from", from, "to", to)
+	// Embedders (the c-shared library forwards info-level slog output to a C
+	// callback) latch on this line to know the relay is bound and serving.
+	// Redacted() masks secret param values with driver-supplied protocol-standard
+	// fingerprints, so the protocol chain stays visible without leaking key
+	// material.
+	slog.Info("netx tun started", "listen", ln.Addr().String(), "from", fromURI.Redacted(), "to", toURI.Redacted())
 
 	<-ctx.Done()
 	shutdownCtx, stop := context.WithTimeout(context.Background(), 3*time.Second)
