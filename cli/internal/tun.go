@@ -73,7 +73,10 @@ func runTun(ctx context.Context, cancel context.CancelFunc, from, to string) err
 	tm := netx.TunMaster[struct{}]{}
 
 	tm.SetRoute(struct{}{}, func(ctx context.Context, conn net.Conn) (bool, context.Context, netx.Tun) {
-		pconn, err := toURI.Dial(ctx)
+		// dialControl is a no-op except on darwin, where it binds netx's outbound
+		// socket to the primary physical interface (IP_BOUND_IF) so the obfuscation
+		// dial does not loop back into the NEPacketTunnelProvider's tunnel (rx=0).
+		pconn, err := toURI.Dial(ctx, netx.WithDialConfig(net.Dialer{Control: dialControl}))
 		if err != nil {
 			slog.Error("dial tun", "err", err)
 			_ = conn.Close()
