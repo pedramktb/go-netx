@@ -80,7 +80,10 @@ func runTun(ctx context.Context, cancel context.CancelFunc, from, to string) err
 			return false, ctx, netx.Tun{}
 		}
 
-		return true, ctx, netx.Tun{Conn: conn, Peer: pconn}
+		// 64KB copy buffer (matches the integration tests) so a single read can
+		// carry a full datagram with headroom; default-0 would fall back to Go's
+		// 32KB io.Copy buffer.
+		return true, ctx, netx.Tun{Conn: conn, Peer: pconn, BufferSize: 64 << 10}
 	})
 
 	go func() {

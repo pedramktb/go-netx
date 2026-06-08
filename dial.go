@@ -7,6 +7,16 @@ import (
 	pudp "github.com/pion/transport/v3/udp"
 )
 
+// defaultUDPSocketBuffer is the OS receive/send buffer applied to UDP sockets (the
+// loopback listener and the upstream dialer) unless the caller overrides it.
+// Without it the platform default applies, and Windows' (~64 KB) is small enough
+// that a burst — a download flight from the server, or a userspace WireGuard
+// adapter flushing across loopback — overflows the socket faster than the relay
+// goroutine drains it. The dropped datagrams force inner-TCP retransmits and
+// collapse throughput; a few MiB of headroom absorbs the bursts. Linux's far
+// larger default rmem masks this, which is why the regression was Windows-only.
+const defaultUDPSocketBuffer = 4 << 20 // 4 MiB
+
 type listenCfg struct {
 	net.ListenConfig
 	packet pudp.ListenConfig
@@ -36,6 +46,16 @@ func Listen(ctx context.Context, network, addr string, opts ...ListenOption) (ne
 		uaddr, err := net.ResolveUDPAddr(network, addr)
 		if err != nil {
 			return nil, err
+		}
+		// Default the OS socket buffers so a bursty peer can't overflow them
+		// (see defaultUDPSocketBuffer). Only fills unset values — an explicit
+		// WithPacketListenConfig still wins. pion applies these via
+		// SetReadBuffer/SetWriteBuffer on the underlying conn.
+		if cfg.packet.ReadBufferSize == 0 {
+			cfg.packet.ReadBufferSize = defaultUDPSocketBuffer
+		}
+		if cfg.packet.WriteBufferSize == 0 {
+			cfg.packet.WriteBufferSize = defaultUDPSocketBuffer
 		}
 		return cfg.packet.Listen(network, uaddr)
 	case "icmp":
@@ -100,6 +120,19 @@ func Dial(ctx context.Context, network, addr string, opts ...DialOption) (net.Co
 		}
 		return NewICMPClientConn(conn, version)
 	default:
-		return cfg.DialContext(ctx, network, addr)
+		conn, err := cfg.DialContext(ctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		// Enlarge the OS socket buffers on UDP so a fast download burst from the
+		// server is absorbed by the kernel instead of overflowing the small
+		// platform default while the relay goroutine is momentarily descheduled
+		// (see defaultUDPSocketBuffer). TCP autotunes its own window, so this is
+		// scoped to *net.UDPConn.
+		if uc, ok := conn.(*net.UDPConn); ok {
+			_ = uc.SetReadBuffer(defaultUDPSocketBuffer)
+			_ = uc.SetWriteBuffer(defaultUDPSocketBuffer)
+		}
+		return conn, nil
 	}
 }
