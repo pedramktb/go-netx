@@ -64,6 +64,17 @@ func (ws Wrappers) String() string {
 	return strings.Join(strs, "+")
 }
 
+// Redacted is like String but masks values of params declared in each
+// Wrapper.SecretParams. Use it whenever a Wrappers chain is rendered into a
+// user-visible stream (logs, errors surfaced to embedders).
+func (ws Wrappers) Redacted() string {
+	strs := make([]string, len(ws))
+	for i, w := range ws {
+		strs[i] = w.Redacted()
+	}
+	return strings.Join(strs, "+")
+}
+
 func (ws Wrappers) MarshalText() ([]byte, error) {
 	return []byte(ws.String()), nil
 }
@@ -120,6 +131,11 @@ type Wrapper struct {
 	Name     string
 	Params   map[string]string
 	Listener bool
+
+	// SecretParams declares param keys in Params whose values are sensitive
+	// (private keys, passphrases). Redacted() masks them; String() does not.
+	// Keep String() output away from user-visible logs. See SecretParam.
+	SecretParams []SecretParam
 
 	ListenerToListener func(net.Listener) (net.Listener, error)
 	ListenerToConn     func(net.Listener) (net.Conn, error)
@@ -254,9 +270,48 @@ func (w Wrapper) Apply(v any) (any, error) {
 	return nil, fmt.Errorf("wrapper %q: incompatible type %T", w.Name, v)
 }
 
+// SecretParam declares one sensitive param on a Wrapper. See Wrapper.SecretParams.
+type SecretParam struct {
+	Name string
+	// Fingerprint is the payload rendered inside REDACTED(...). Drivers
+	// compute it once at parse time in their protocol's standard form (e.g.
+	// "SHA256:..." for SSH, "sha256=AB:CD:..." for TLS) so operators can
+	// cross-check against ssh-keygen/openssl/browser output. Leave empty for
+	// low-entropy secrets (e.g. passwords) where a fingerprint would be
+	// brute-forceable — the value renders as a bare REDACTED.
+	Fingerprint string
+}
+
 func (w Wrapper) String() string {
+	return w.render(nil)
+}
+
+// Redacted is like String but renders the value of each param declared in
+// SecretParams via its Fingerprint function. The output is not round-trippable
+// through UnmarshalText. Use Redacted whenever a Wrapper is rendered into a
+// user-visible stream (logs, errors surfaced to embedders).
+func (w Wrapper) Redacted() string {
+	if len(w.SecretParams) == 0 {
+		return w.String()
+	}
+	secrets := make(map[string]SecretParam, len(w.SecretParams))
+	for _, sp := range w.SecretParams {
+		secrets[sp.Name] = sp
+	}
+	return w.render(secrets)
+}
+
+func (w Wrapper) render(secrets map[string]SecretParam) string {
 	pairs := make([]string, 0, len(w.Params))
 	for k, v := range w.Params {
+		if sp, ok := secrets[k]; ok {
+			if sp.Fingerprint == "" {
+				pairs = append(pairs, k+"=REDACTED")
+			} else {
+				pairs = append(pairs, k+"=REDACTED("+sp.Fingerprint+")")
+			}
+			continue
+		}
 		pairs = append(pairs, k+"="+v)
 	}
 	if len(pairs) > 0 {

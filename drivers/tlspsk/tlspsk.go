@@ -1,6 +1,7 @@
 package tlspsk
 
 import (
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
 	"fmt"
@@ -45,13 +46,19 @@ func init() {
 			CipherSuites:       []uint16{tlspks.TLS_PSK_WITH_AES_256_CBC_SHA},
 			InsecureSkipVerify: true,
 		}
+		pskSum := sha256.Sum256(psk)
+		secretParams := []netx.SecretParam{{
+			Name:        "key",
+			Fingerprint: "sha256=" + colonHex(pskSum[:8]),
+		}}
 		if listener {
 			// Provide dummy Certificates to make tlspsk happy on server side
 			cfg.Certificates = dummyCert()
 			return netx.Wrapper{
-				Name:     "tlspsk",
-				Params:   params,
-				Listener: listener,
+				Name:         "tlspsk",
+				Params:       params,
+				Listener:     listener,
+				SecretParams: secretParams,
 				ListenerToListener: func(l net.Listener) (net.Listener, error) {
 					return netx.ConnWrapListener(l, func(c net.Conn) (net.Conn, error) {
 						return tlswithpks.Server(c, cfg), nil
@@ -62,9 +69,10 @@ func init() {
 				}}, nil
 		} else {
 			return netx.Wrapper{
-				Name:     "tlspsk",
-				Params:   params,
-				Listener: listener,
+				Name:         "tlspsk",
+				Params:       params,
+				Listener:     listener,
+				SecretParams: secretParams,
 				DialerToDialer: func(f netx.Dialer) (netx.Dialer, error) {
 					return netx.ConnWrapDialer(f, func(c net.Conn) (net.Conn, error) {
 						return tlswithpks.Client(c, cfg), nil
@@ -75,6 +83,19 @@ func init() {
 				}}, nil
 		}
 	})
+}
+
+// colonHex formats b as colon-separated hex pairs (e.g. "ab:cd:ef").
+func colonHex(b []byte) string {
+	const hexdigits = "0123456789abcdef"
+	out := make([]byte, 0, len(b)*3-1)
+	for i, x := range b {
+		if i > 0 {
+			out = append(out, ':')
+		}
+		out = append(out, hexdigits[x>>4], hexdigits[x&0x0f])
+	}
+	return string(out)
 }
 
 // dummyCert returns a self-signed certificate for use in tls-psk server mode. (ed25519)

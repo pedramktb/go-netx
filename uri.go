@@ -36,6 +36,13 @@ func (u URI) String() string {
 	return u.Scheme.String() + "://" + u.Addr
 }
 
+// Redacted is like String but renders the scheme via Scheme.Redacted, masking
+// sensitive param values. Use Redacted whenever a URI is rendered into a
+// user-visible stream; String remains round-trippable through UnmarshalText.
+func (u URI) Redacted() string {
+	return u.Scheme.Redacted() + "://" + u.Addr
+}
+
 func (u URI) MarshalText() ([]byte, error) {
 	return []byte(u.String()), nil
 }

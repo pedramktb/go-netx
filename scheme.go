@@ -62,6 +62,16 @@ func (s Scheme) String() string {
 	return str
 }
 
+// Redacted is like String but renders the wrapper chain via Wrappers.Redacted,
+// masking sensitive param values declared by each driver's SecretParams.
+func (s Scheme) Redacted() string {
+	str := s.Transport.String()
+	if len(s.Wrappers) > 0 {
+		str += "+" + s.Wrappers.Redacted()
+	}
+	return str
+}
+
 func (s Scheme) MarshalText() ([]byte, error) {
 	return []byte(s.String()), nil
 }

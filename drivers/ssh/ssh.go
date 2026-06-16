@@ -2,6 +2,8 @@ package ssh
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -42,6 +44,7 @@ func init() {
 				return netx.Wrapper{}, fmt.Errorf("uri: unknown ssh parameter %q", key)
 			}
 		}
+		secretParams := sshSecretParams(sshkey)
 		if listener {
 			cfg := &ssh.ServerConfig{}
 			if sshkey == nil {
@@ -68,9 +71,10 @@ func init() {
 				return netx.Wrapper{}, fmt.Errorf("uri: ssh server requires pubkey or pass parameter")
 			}
 			return netx.Wrapper{
-				Name:     "ssh",
-				Params:   params,
-				Listener: listener,
+				Name:         "ssh",
+				Params:       params,
+				Listener:     listener,
+				SecretParams: secretParams,
 				ListenerToListener: func(l net.Listener) (net.Listener, error) {
 					return netx.ConnWrapListener(l, func(c net.Conn) (net.Conn, error) {
 						return sshproto.NewServerConn(c, cfg)
@@ -100,9 +104,10 @@ func init() {
 				return netx.Wrapper{}, fmt.Errorf("uri: ssh client requires key or pass parameter")
 			}
 			return netx.Wrapper{
-				Name:     "ssh",
-				Params:   params,
-				Listener: listener,
+				Name:         "ssh",
+				Params:       params,
+				Listener:     listener,
+				SecretParams: secretParams,
 				DialerToDialer: func(f netx.Dialer) (netx.Dialer, error) {
 					return netx.ConnWrapDialer(f, func(c net.Conn) (net.Conn, error) {
 						return sshproto.NewClientConn(c, cfg)
@@ -113,4 +118,22 @@ func init() {
 				}}, nil
 		}
 	})
+}
+
+// sshSecretParams declares the sensitive params on an ssh Wrapper:
+//   - "key": private key — fingerprinted as the matching public key's standard
+//     SSH fingerprint ("SHA256:<base64-of-sha256-of-wire-format>"), the same
+//     value `ssh-keygen -lf` prints.
+//   - "pass": password — bare REDACTED. A fingerprint of a low-entropy secret
+//     is brute-forceable, so no payload is exposed.
+func sshSecretParams(signer ssh.Signer) []netx.SecretParam {
+	out := []netx.SecretParam{{Name: "pass"}}
+	if signer != nil {
+		sum := sha256.Sum256(signer.PublicKey().Marshal())
+		out = append(out, netx.SecretParam{
+			Name:        "key",
+			Fingerprint: "SHA256:" + base64.RawStdEncoding.EncodeToString(sum[:]),
+		})
+	}
+	return out
 }
